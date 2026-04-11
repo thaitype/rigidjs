@@ -4,4 +4,5 @@
 - [x] task-2: Internal bitmap + free-list primitives under `src/slab/` with full unit tests
 - [x] task-3: `slab()` core implementation (insert/remove/get/has/len/capacity/clear/drop/buffer) with full test coverage
 - [x] task-4: Public API wiring, `examples/particles.ts` acceptance run, and milestone-2 acceptance report
-- [x] task-5: Slot-key amendment — `remove/has` take `number`, `handle.slot` public getter
+- [x] task-5: Slot-key amendment
+- [x] task-6: Public type hardening — `Handle<F>` mapped type, `const F` generic, delete example shadow interfaces — `remove/has` take `number`, `handle.slot` public getter

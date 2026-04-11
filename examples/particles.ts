@@ -144,12 +144,39 @@ for (let i = 0; i < particles.capacity; i++) {
 
 // ---------------------------------------------------------------------------
 // Print summary
+//
+// Two independent sources of "how many particles are alive" are compared:
+//   - particles.len    → counter maintained internally by the slab
+//                        (incremented on insert, decremented on remove)
+//   - aliveCount       → scan-count we just computed by walking the bitmap
+//                        via has(i) in the loop above
+//
+// These values MUST match. If they ever diverge, the slab's internal
+// bookkeeping is corrupt — e.g. remove() cleared the bit but forgot to
+// decrement len, or insert() bumped len but forgot to set the bit.
+// Treat a mismatch as a library bug, not a usage bug.
 // ---------------------------------------------------------------------------
 
-console.log('capacity:', particles.capacity)
-console.log('len (after removal):', particles.len)
-console.log('alive count (manual):', aliveCount)
-console.log('sum pos.x (alive):', sumPosX.toFixed(6))
+const consistent = particles.len === aliveCount
+
+console.log('capacity:            ', particles.capacity)
+console.log('inserted:            ', N)
+console.log('len (slab counter):  ', particles.len)
+console.log('alive (manual scan): ', aliveCount)
+console.log('removed this tick:   ', N - particles.len)
+console.log('sum pos.x (alive):   ', sumPosX.toFixed(6))
+console.log(
+  consistent
+    ? 'consistency check:    OK (len === alive count) — slab bookkeeping is sound'
+    : `consistency check:    FAIL (len=${particles.len} !== alive=${aliveCount}) — slab bug!`,
+)
+
+if (!consistent) {
+  // Throw so the example exits non-zero and CI catches a regression.
+  throw new Error(
+    `slab bookkeeping inconsistent: len=${particles.len}, alive=${aliveCount}`,
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Release the slab
