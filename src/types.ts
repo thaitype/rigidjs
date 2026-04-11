@@ -18,12 +18,19 @@ export type StructFields = Record<string, FieldType>
 
 /**
  * A struct blueprint. Carries sizeof and the original field map.
- * Internal members (offset table, generated handle constructor) may be
- * added in later tasks but are NOT part of the public contract.
+ *
+ * `_Handle` and `_offsets` are internal-only implementation details.
+ * They are NOT part of the public contract and may change without notice.
+ * Prefixed with underscore and marked as optional so they do not appear
+ * in public type signatures while still being accessible internally.
  */
 export interface StructDef<F extends StructFields> {
   readonly sizeof: number
   readonly fields: F
+  /** @internal Generated handle constructor — implementation detail. */
+  readonly _Handle?: new (view: DataView, baseOffset: number) => object
+  /** @internal Offset table — implementation detail. */
+  readonly _offsets?: ReadonlyMap<string, { offset: number; type: FieldType }>
 }
 
 /**
