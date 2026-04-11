@@ -13,7 +13,6 @@ import { generateHandleClass } from './handle-codegen.js'
  *   for use by containers (slab, vec, bump) in later milestones.
  *
  * Throws if `fields` is empty (delegated to `computeLayout`).
- * Throws if any field is a nested StructDef (task-3 limitation; task-4 adds support).
  *
  * @param fields An object literal mapping field names to numeric type tokens or nested StructDefs.
  * @returns A StructDef blueprint.

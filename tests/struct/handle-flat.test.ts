@@ -117,12 +117,13 @@ describe('struct — validation', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Nested struct throws task-3 error
+// Nested struct no longer throws — task-4 adds nested struct support.
+// Full nested tests live in handle-nested.test.ts.
 // ---------------------------------------------------------------------------
-describe('struct — nested struct throws task-3 not-yet-supported error', () => {
-  it('throws when a field is a nested StructDef', () => {
+describe('struct — nested struct does not throw', () => {
+  it('struct with a nested StructDef field succeeds', () => {
     const Vec3 = struct({ x: 'f64', y: 'f64', z: 'f64' })
-    expect(() => struct({ nested: Vec3 })).toThrow('nested structs not yet supported in task-3')
+    expect(() => struct({ pos: Vec3, life: 'f32' })).not.toThrow()
   })
 })
 
