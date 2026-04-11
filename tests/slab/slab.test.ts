@@ -443,14 +443,14 @@ describe('slab — nested struct (Particle)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// No premature public export — slab NOT yet exported from src/index.ts
+// Public export — slab IS exported from src/index.ts (wired up in task-4)
 // ---------------------------------------------------------------------------
 
-describe('no premature public export', () => {
-  it('pkg.slab === undefined (task-4 wires it up)', async () => {
+describe('public export', () => {
+  it('pkg.slab is a function (wired up by task-4)', async () => {
     // Dynamic import to avoid type-level errors
     const pkg = await import('../../src/index.js')
-    expect((pkg as any).slab).toBeUndefined()
+    expect(typeof (pkg as any).slab).toBe('function')
   })
 })
 

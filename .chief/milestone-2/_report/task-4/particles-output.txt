@@ -1,0 +1,4 @@
+capacity: 1024
+len (after removal): 252
+alive count (manual): 252
+sum pos.x (alive): 616.928645
