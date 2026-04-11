@@ -127,40 +127,49 @@ import { struct, slab } from 'rigidjs'
 // Reserve 50k slots: ArrayBuffer(56 × 50,000) = 2.8MB, one chunk
 const particles = slab(Particle, 50_000)
 
-// .insert() — fill next free slot, returns a handle
+// .insert() — fill next free slot, returns the shared handle rebased to it
 const p = particles.insert()
 p.pos.x = 100
 p.vel.y = -9.8
 p.life = 1.0
 
-// Iterate occupied slots
-for (const p of particles) {
-  p.pos.x += p.vel.x
-  p.life -= 0.016
+// Capture the slot number if you need to remove it later.
+// Never hold `p` itself past the next insert()/get() call — it will be rebased.
+const slotA = p.slot
+
+// Iterate occupied slots (manual loop until .iter() ships — see §4.5)
+for (let i = 0; i < particles.capacity; i++) {
+  if (!particles.has(i)) continue
+  const q = particles.get(i)
+  q.pos.x += q.vel.x
+  q.life -= 0.016
 }
 
 // .remove() — mark slot as free (reused by next insert)
-particles.remove(p)
+particles.remove(slotA)
 
 // .drop() — release entire ArrayBuffer
 particles.drop()
 // particles.insert() after drop → throws Error
 ```
 
+**Handle reuse invariant.** `slab.insert()` and `slab.get(slot)` always return the **same handle instance**, rebased to whichever slot was just accessed. To keep a stable reference across calls, capture the primitive `.slot` number — never the handle object. This trades a tiny ergonomic cost for zero per-call allocation.
+
 **Properties and methods:**
 
 | API | Returns | Description |
 |-----|---------|-------------|
-| `.insert()` | handle | Fill next free slot |
-| `.insert({...})` | handle | Validate all fields then write atomically |
-| `.remove(handle)` | void | Free slot for reuse |
-| `.get(index)` | handle | Access slot by index |
-| `.has(handle)` | boolean | Check if slot is occupied |
+| `.insert()` | handle | Fill next free slot. Returns the shared handle rebased to it. |
+| `.insert({...})` | handle | Validate all fields then write atomically (future). |
+| `.remove(slot)` | void | Free slot for reuse. Takes a numeric slot index. |
+| `.get(slot)` | handle | Rebase shared handle to slot. |
+| `.has(slot)` | boolean | Check if slot is occupied. |
+| `handle.slot` | number | Read-only: the slot the handle currently points at. |
 | `.len` | number | Current occupied slot count |
 | `.capacity` | number | Max slots |
 | `.clear()` | void | Mark all slots free (keeps buffer) |
 | `.drop()` | void | Release buffer. Throws on subsequent use. |
-| `.iter()` | Iterator | Lazy iterator over occupied slots |
+| `.iter()` | Iterator | Lazy iterator over occupied slots (future). |
 | `.buffer` | ArrayBuffer | Underlying memory (escape hatch) |
 
 **When to use:** Game entities, connection pools, object managers — items are created and destroyed frequently, max count is known.

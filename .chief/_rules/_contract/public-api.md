@@ -47,13 +47,51 @@ export function struct<F extends StructFields>(fields: F): StructDef<F>
 - **Nested struct = inline.** Embedding `StructDef<X>` adds `sizeof(X)` bytes at that offset.
 - Field access paths for nested structs use dotted access on handles: `p.pos.x`, not `p['pos.x']`.
 
-## `slab(def, capacity)` — Phase 1b
+## `slab(def, capacity)` — Phase 1b (shipped in milestone-2)
 
 ```ts
-export function slab<F>(def: StructDef<F>, capacity: number): Slab<F>
+export function slab<F extends StructFields>(
+  def: StructDef<F>,
+  capacity: number,
+): Slab<F>
+
+export interface Slab<F extends StructFields> {
+  insert(): Handle<F>
+  remove(slot: number): void
+  get(slot: number): Handle<F>
+  has(slot: number): boolean
+  readonly len: number
+  readonly capacity: number
+  clear(): void
+  drop(): void
+  readonly buffer: ArrayBuffer
+}
 ```
 
-Not in milestone-1 scope. Listed for forward reference only. See spec §4.2 for full API.
+### Slot key semantics
+
+- A **slot** is a non-negative integer index into the slab, in `[0, capacity)`.
+- `insert()` returns a shared `Handle<F>` already rebased to the new slot. The handle's `slot` getter exposes the numeric index.
+- `remove(slot)`, `get(slot)`, and `has(slot)` all take the numeric slot — not a handle. This matches the Rust `slab` crate and keeps these calls allocation-free while avoiding stale-reference footguns.
+- To hold a reference for later removal, capture the number: `const slotA = slab.insert().slot`.
+
+### Handle shape (observable)
+
+Every struct handle carries one public read-only member in addition to its generated field accessors:
+
+```ts
+interface HandleBase {
+  readonly slot: number  // stable slot index (0 for handles not attached to a container)
+}
+```
+
+For handles produced by `slab()`, `slot` is the index of the slot the handle currently points to. For handles obtained via internal test helpers (e.g., `createSingleSlot`), `slot` is `0`.
+
+`slot` is a read-only getter — never assign to it from user code.
+
+## `vec(def, capacity)` — Phase 1c
+
+Not yet shipped. See spec §4.3.
 
 ## `vec(def, capacity)` — Phase 1c
 

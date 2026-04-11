@@ -13,37 +13,47 @@ export type { StructDef, StructFields, NumericType, Slab, Handle }
 ## New Types
 
 ```ts
-/** A reusable accessor into a struct's backing buffer. */
-export type Handle<F extends StructFields> = /* generated class instance */
+/**
+ * A reusable accessor into a struct's backing buffer.
+ * Exposes struct fields plus a read-only `slot` index.
+ */
+export type Handle<F extends StructFields> = /* generated class instance */ {
+  readonly slot: number
+  // ...plus a typed getter/setter for each field in F
+}
 
 /** Fixed-capacity, slot-reusing container. */
 export interface Slab<F extends StructFields> {
   /**
-   * Fill the next free slot and return a reusable handle at that slot.
-   * The returned handle is the SAME object across calls — do not hold
-   * references past the next insert/get/remove call without copying.
+   * Fill the next free slot and return the shared handle rebased to it.
+   * The handle is the SAME instance across calls — capture `.slot` if you
+   * need a stable reference for later `remove()` / `get()` / `has()`.
    *
    * @throws if the slab is full or has been dropped.
    */
   insert(): Handle<F>
 
   /**
-   * Free the slot the given handle currently refers to.
+   * Free the given slot.
    *
-   * @throws on double-free or if the slab has been dropped.
+   * @throws on double-free, out-of-range slot, or if the slab has been dropped.
    */
-  remove(handle: Handle<F>): void
+  remove(slot: number): void
 
   /**
-   * Rebase the shared handle to slot `index`. Does NOT check occupancy —
-   * callers should use `has()` if they need to verify.
+   * Rebase the shared handle to `slot`. Does NOT check occupancy —
+   * callers should use `has(slot)` first if they need to verify.
    *
-   * @throws if index is out of range or the slab has been dropped.
+   * @throws if slot is out of range or the slab has been dropped.
    */
-  get(index: number): Handle<F>
+  get(slot: number): Handle<F>
 
-  /** True if the slot the handle refers to is currently occupied. */
-  has(handle: Handle<F>): boolean
+  /**
+   * True if the given slot is currently occupied.
+   *
+   * @throws if slot is out of range or the slab has been dropped.
+   */
+  has(slot: number): boolean
 
   /** Number of occupied slots. */
   readonly len: number
@@ -76,14 +86,15 @@ export function slab<F extends StructFields>(
 - Allocates exactly one `ArrayBuffer` of `def.sizeof * capacity` bytes.
 - `capacity` must be a positive integer. Throws otherwise.
 - Insertion order: first `insert()` on a fresh slab fills slot 0, then slot 1, etc.
-- After a `remove(h)`, the freed slot is the next slot returned by `insert()` (LIFO recycling via the free-list).
-- `insert()` returning a handle and then calling `insert()` again **invalidates the previous handle's slot binding** — the same handle instance is rebased. Users who need stable references must read field values out into JS primitives.
+- After `remove(slot)`, the freed slot is the next slot returned by `insert()` (LIFO recycling via the free-list).
+- `insert()` rebases the shared handle and returns it. A subsequent `insert()` or `get()` call rebases the same instance again. Users who need a stable reference must capture `handle.slot` (a primitive number) immediately.
 
 ## Handle Reuse Contract (Observable)
 
-1. `slab.insert()` and `slab.get(i)` both return the same handle instance (reference equality).
-2. The handle carries an internal slot index (implementation detail — not a public property).
+1. `slab.insert()` and `slab.get(slot)` both return the same handle instance (reference equality).
+2. `handle.slot` is a public read-only getter returning the numeric slot index the handle currently points at.
 3. Reading/writing a field on the handle affects the slot it was last rebased to. Prior slots are untouched.
+4. `remove(slot)`, `has(slot)`, and `get(slot)` take primitive numbers, never handles. This makes them cheap, unambiguous, and stale-reference-proof.
 
 ## Unchanged from Milestone-1
 
