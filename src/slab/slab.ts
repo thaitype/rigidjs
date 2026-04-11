@@ -1,0 +1,209 @@
+import type { StructDef, StructFields } from '../types.js'
+import { bitmapByteLength, bitmapSet, bitmapClear, bitmapGet } from './bitmap.js'
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
+
+/**
+ * Handle<F> is the type of the generated handle class instance for a given
+ * struct field map. Exported so callers can annotate variables that hold
+ * handles returned by insert() / get().
+ */
+export type Handle<F extends StructFields> = InstanceType<
+  NonNullable<StructDef<F>['_Handle']>
+>
+
+/**
+ * Fixed-capacity, slot-reusing container.
+ *
+ * All returned handles are the SAME object instance — do not hold references
+ * past the next insert() / get() / remove() call without copying field values
+ * out into JS primitives first.
+ */
+export interface Slab<F extends StructFields> {
+  /**
+   * Fill the next free slot and return the shared reusable handle rebased to
+   * that slot.
+   *
+   * @throws "slab at capacity" if no free slots remain.
+   * @throws "slab has been dropped" after drop().
+   */
+  insert(): Handle<F>
+
+  /**
+   * Free the slot the given handle currently refers to.
+   *
+   * @throws "slab: double remove at slot N" on double-free.
+   * @throws "slab has been dropped" after drop().
+   */
+  remove(handle: Handle<F>): void
+
+  /**
+   * Rebase the shared handle to slot `index`. Does NOT check occupancy.
+   * Use has() for occupancy checks.
+   *
+   * @throws "slab: index out of range" if index is invalid.
+   * @throws "slab has been dropped" after drop().
+   */
+  get(index: number): Handle<F>
+
+  /**
+   * Return true iff the slot the handle refers to is currently occupied.
+   *
+   * @throws "slab has been dropped" after drop().
+   */
+  has(handle: Handle<F>): boolean
+
+  /** Number of currently occupied slots. */
+  readonly len: number
+
+  /** Maximum number of slots. */
+  readonly capacity: number
+
+  /** Mark every slot free; rebuild the free-list. Keeps the buffer. */
+  clear(): void
+
+  /** Release the underlying buffer. All subsequent operations throw. */
+  drop(): void
+
+  /** Underlying ArrayBuffer — escape hatch for power users. Read-only reference. */
+  readonly buffer: ArrayBuffer
+}
+
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a fixed-capacity slab container for the given struct definition.
+ *
+ * Exactly one ArrayBuffer and one DataView are allocated per slab().
+ * One handle instance is pre-built and reused across all insert()/get() calls
+ * (zero per-call allocations on hot paths).
+ *
+ * @param def       A StructDef produced by struct().
+ * @param capacity  Positive integer — maximum number of simultaneous entries.
+ * @throws if capacity is not a positive integer.
+ * @throws if def._Handle is absent (def was not produced by struct()).
+ */
+export function slab<F extends StructFields>(
+  def: StructDef<F>,
+  capacity: number,
+): Slab<F> {
+  // --- Validation ---
+  if (!Number.isInteger(capacity) || capacity <= 0) {
+    throw new Error('slab: capacity must be a positive integer')
+  }
+  if (!def._Handle) {
+    throw new Error('slab: StructDef has no _Handle — was it created by struct()?')
+  }
+
+  // --- One-time allocations ---
+  // Exactly ONE ArrayBuffer and ONE DataView — enforced by task spec + grep.
+  const _buf = new ArrayBuffer(def.sizeof * capacity)
+  const _view = new DataView(_buf)
+
+  // Occupancy bitmap: bit i set iff slot i is occupied.
+  const _bits = new Uint8Array(bitmapByteLength(capacity))
+
+  // Free-list seeded descending so pop() returns 0, 1, 2, ... in order.
+  const _freeList: number[] = []
+  for (let i = capacity - 1; i >= 0; i--) _freeList.push(i)
+
+  // One reusable handle instance — rebased on every insert()/get() call.
+  // `any` is required here to bridge the generated constructor's opaque
+  // `object` return type to the typed Handle<F> shape. Isolated to this site.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const _handle = new (def._Handle as any)(_view, 0, 0) as Handle<F>
+
+  let _len = 0
+  let _dropped = false
+
+  // Helper created once at slab() call time — single closure allocation, not per-call.
+  function assertLive(): void {
+    if (_dropped) throw new Error('slab has been dropped')
+  }
+
+  // ---------------------------------------------------------------------------
+  // Return the slab as a plain object literal with getters where needed.
+  // Closures are created once here (slab() call time), never inside hot paths.
+  // ---------------------------------------------------------------------------
+  return {
+    insert(): Handle<F> {
+      assertLive()
+      const slot = _freeList.pop()
+      if (slot === undefined) throw new Error('slab at capacity')
+      bitmapSet(_bits, slot)
+      _len++
+      // `any` cast isolated here — _rebase is generated by handle-codegen.ts
+      // and not part of the static TS type. See src/struct/handle-codegen.ts.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;((_handle as any)._rebase(_view, slot * def.sizeof, slot))
+      return _handle
+    },
+
+    remove(handle: Handle<F>): void {
+      assertLive()
+      // `any` cast isolated here — _slot is an internal property of the generated handle.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const slot: number = (handle as any)._slot
+      if (!bitmapGet(_bits, slot)) {
+        throw new Error('slab: double remove at slot ' + slot)
+      }
+      bitmapClear(_bits, slot)
+      _freeList.push(slot)
+      _len--
+    },
+
+    get(index: number): Handle<F> {
+      assertLive()
+      if (!Number.isInteger(index) || index < 0 || index >= capacity) {
+        throw new Error('slab: index out of range')
+      }
+      // `any` cast isolated here — same boundary as insert().
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;((_handle as any)._rebase(_view, index * def.sizeof, index))
+      return _handle
+    },
+
+    has(handle: Handle<F>): boolean {
+      assertLive()
+      // `any` cast isolated here — reading internal _slot from the generated handle.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return bitmapGet(_bits, (handle as any)._slot)
+    },
+
+    get len(): number {
+      assertLive()
+      return _len
+    },
+
+    get capacity(): number {
+      assertLive()
+      return capacity
+    },
+
+    clear(): void {
+      assertLive()
+      _bits.fill(0)
+      _freeList.length = 0
+      for (let i = capacity - 1; i >= 0; i--) _freeList.push(i)
+      _len = 0
+    },
+
+    drop(): void {
+      assertLive()
+      _dropped = true
+      // Null out internal references so GC can reclaim them.
+      // `any` casts are required to assign null to typed variables after drop.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(this as any)._buf = null
+    },
+
+    get buffer(): ArrayBuffer {
+      assertLive()
+      return _buf
+    },
+  }
+}
