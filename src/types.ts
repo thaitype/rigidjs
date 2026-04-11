@@ -5,16 +5,15 @@
 export type NumericType = 'f64' | 'f32' | 'u32' | 'u16' | 'u8' | 'i32' | 'i16' | 'i8'
 
 /**
- * FieldType is either a numeric type token or a nested StructDef.
- * The `StructDef<any>` here is intentional: FieldType must accept any
- * StructDef regardless of its specific field shape (recursive type).
+ * Recursive map of field names to numeric tokens or nested StructDefs.
+ * Interface form is required so the self-reference resolves cleanly.
  */
-export type FieldType = NumericType | StructDef<any> // eslint-disable-line @typescript-eslint/no-explicit-any
+export interface StructFields {
+  readonly [key: string]: NumericType | StructDef<StructFields>
+}
 
-/**
- * A map of field names to their types.
- */
-export type StructFields = Record<string, FieldType>
+/** Kept for backwards compatibility of existing internal imports. */
+export type FieldType = NumericType | StructDef<StructFields>
 
 /**
  * A struct blueprint. Carries sizeof and the original field map.
@@ -32,6 +31,27 @@ export interface StructDef<F extends StructFields> {
   /** @internal Offset table — implementation detail. */
   readonly _offsets?: ReadonlyMap<string, { offset: number; type: FieldType }>
 }
+
+/**
+ * Maps a single field type to its runtime JS value.
+ *  - Numeric tokens → number
+ *  - Nested StructDef<G> → Handle<G>
+ */
+type FieldValue<T> =
+  T extends NumericType ? number :
+  T extends StructDef<infer G> ? Handle<G> :
+  never
+
+/**
+ * Public structural type of a struct handle.
+ *
+ * Every field in F becomes a writable accessor of the appropriate JS type.
+ * `slot` is the read-only slot index the handle currently points to
+ * (for nested handles it is always 0 and has no meaning — do not rely on it).
+ */
+export type Handle<F extends StructFields> =
+  { readonly slot: number }
+  & { -readonly [K in keyof F]: FieldValue<F[K]> }
 
 /**
  * Byte sizes for each numeric type.

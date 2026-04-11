@@ -17,7 +17,7 @@ import { generateHandleClass } from './handle-codegen.js'
  * @param fields An object literal mapping field names to numeric type tokens or nested StructDefs.
  * @returns A StructDef blueprint.
  */
-export function struct<F extends StructFields>(fields: F): StructDef<F> {
+export function struct<const F extends StructFields>(fields: F): StructDef<F> {
   const layout = computeLayout(fields)
   const Handle = generateHandleClass(fields, layout.offsets)
 

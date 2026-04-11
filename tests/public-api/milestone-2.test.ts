@@ -144,3 +144,35 @@ describe('public-api — error cases', () => {
     expect(() => s.capacity).toThrow('slab has been dropped')
   })
 })
+
+// ---------------------------------------------------------------------------
+// Task-6: Handle<F> is fully typed — no casts required at use sites
+// ---------------------------------------------------------------------------
+
+describe('public-api — Handle<F> is fully typed', () => {
+  it('field access on insert() handle is typed as number without casts', () => {
+    const S = struct({
+      pos: struct({ x: 'f64', y: 'f64' }),
+      life: 'f32',
+      id: 'u32',
+    })
+    const s = slab(S, 4)
+    const h = s.insert()
+
+    // These lines must compile WITHOUT any cast.
+    h.pos.x = 1.5
+    h.pos.y = 2.5
+    h.life = 0.75
+    h.id = 42
+
+    expect(h.pos.x).toBe(1.5)
+    expect(h.life).toBeCloseTo(0.75, 5)
+    expect(h.id).toBe(42)
+
+    // slot is readonly — the next line must be a type error.
+    // @ts-expect-error slot is readonly
+    expect(() => { h.slot = 99 }).toThrow()
+
+    s.drop()
+  })
+})

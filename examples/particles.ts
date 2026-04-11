@@ -27,6 +27,11 @@
  *   }
  *
  * This is allocation-free and stale-reference-proof.
+ *
+ * # Field access is directly typed
+ * struct() uses a `const` type parameter so literal tokens like 'f64' are
+ * preserved. Handle<F> maps each field to its JS type (number for numeric
+ * tokens, Handle<G> for nested structs). No shadow interfaces or casts needed.
  */
 
 import { struct, slab, type Slab } from '../src/index.js'
@@ -44,20 +49,6 @@ const Particle = struct({
   id: 'u32',    // 4 bytes
 })
 // sizeof(Particle) === 56 bytes
-
-// ---------------------------------------------------------------------------
-// Helper type: field accessor shape for runtime use.
-// Handle<F> resolves to `object` at the TypeScript level because the handle
-// class is code-generated at runtime. Cast to ParticleHandle at use sites.
-// ---------------------------------------------------------------------------
-
-interface Vec3Handle { x: number; y: number; z: number }
-interface ParticleHandle {
-  pos: Vec3Handle
-  vel: Vec3Handle
-  life: number
-  id: number
-}
 
 // ---------------------------------------------------------------------------
 // Slab creation
@@ -81,9 +72,8 @@ function lcg(seed: number): { next: number; value: number } {
 let seed = 42
 for (let i = 0; i < N; i++) {
   // insert() returns the shared handle rebased to the new slot.
-  // Cast to ParticleHandle to access typed fields — the codegen provides
-  // these accessors at runtime; the TypeScript type resolves to `object`.
-  const h = particles.insert() as unknown as ParticleHandle
+  // Field access is fully typed — no cast needed.
+  const h = particles.insert()
 
   let r = lcg(seed)
   h.pos.x = r.value * 200 - 100
@@ -120,7 +110,7 @@ const DT = 1.0
 
 for (let i = 0; i < particles.capacity; i++) {
   if (!particles.has(i)) continue
-  const h = particles.get(i) as unknown as ParticleHandle
+  const h = particles.get(i)
   h.pos.x = h.pos.x + h.vel.x * DT
   h.pos.y = h.pos.y + h.vel.y * DT
   h.pos.z = h.pos.z + h.vel.z * DT
@@ -135,7 +125,7 @@ for (let i = 0; i < particles.capacity; i++) {
 
 for (let i = 0; i < particles.capacity; i++) {
   if (!particles.has(i)) continue
-  const h = particles.get(i) as unknown as ParticleHandle
+  const h = particles.get(i)
   if (h.life < 0) particles.remove(i)
 }
 
@@ -148,7 +138,7 @@ let aliveCount = 0
 
 for (let i = 0; i < particles.capacity; i++) {
   if (!particles.has(i)) continue
-  sumPosX += (particles.get(i) as unknown as ParticleHandle).pos.x
+  sumPosX += particles.get(i).pos.x
   aliveCount++
 }
 

@@ -1,18 +1,11 @@
-import type { StructDef, StructFields } from '../types.js'
+import type { StructDef, StructFields, Handle } from '../types.js'
 import { bitmapByteLength, bitmapSet, bitmapClear, bitmapGet } from './bitmap.js'
+
+export type { Handle }
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
-
-/**
- * Handle<F> is the type of the generated handle class instance for a given
- * struct field map. Exported so callers can annotate variables that hold
- * handles returned by insert() / get().
- */
-export type Handle<F extends StructFields> = InstanceType<
-  NonNullable<StructDef<F>['_Handle']>
->
 
 /**
  * Fixed-capacity, slot-reusing container.
