@@ -1,2 +1,2 @@
-// Public re-export entry point for rigidjs.
-// Real exports (struct, StructDef, StructFields, NumericType) land in task 5.
+export { struct } from './struct/struct.js'
+export type { StructDef, StructFields, NumericType } from './types.js'
