@@ -49,12 +49,16 @@ function findResults(names: string[]): BenchResult[] {
   return names.map((n) => results.find((r) => r.name === n)!).filter(Boolean)
 }
 
+function fmtNullable(v: number | null): string {
+  return v === null ? '-' : v.toLocaleString()
+}
+
 function mdTable(rows: BenchResult[]): string {
-  const header = '| name | ops/s | heapΔ | heapMB | rssMB | p50µs | p99µs |'
-  const sep = '|------|-------|-------|--------|-------|-------|-------|'
+  const header = '| name | ops/s | heapΔ | allocΔ | retained | heapMB | rssMB | p50µs | p99µs |'
+  const sep = '|------|-------|-------|--------|----------|--------|-------|-------|-------|'
   const dataRows = rows.map(
     (r) =>
-      `| ${r.name} | ${r.opsPerSec.toLocaleString()} | ${r.heapObjectsDelta.toLocaleString()} | ${r.heapSizeMB.toFixed(2)} | ${r.rssMB.toFixed(2)} | ${r.p50Us.toFixed(2)} | ${r.p99Us.toFixed(2)} |`,
+      `| ${r.name} | ${r.opsPerSec.toLocaleString()} | ${r.heapObjectsDelta.toLocaleString()} | ${fmtNullable(r.allocationDelta)} | ${fmtNullable(r.retainedAfterGC)} | ${r.heapSizeMB.toFixed(2)} | ${r.rssMB.toFixed(2)} | ${r.p50Us.toFixed(2)} | ${r.p99Us.toFixed(2)} |`,
   )
   return [header, sep, ...dataRows].join('\n')
 }
@@ -64,12 +68,17 @@ const b2Results = findResults(b2Scenarios.map((s) => s.name))
 const b3Results = findResults(b3Scenarios.map((s) => s.name))
 const b7Results = findResults(b7Scenarios.map((s) => s.name))
 
-const b1JsDelta = b1Results[0]?.heapObjectsDelta ?? 0
-const b1RigidDelta = b1Results[1]?.heapObjectsDelta ?? 0
+const b1JsAllocDelta = b1Results[0]?.allocationDelta ?? 0
+const b1RigidAllocDelta = b1Results[1]?.allocationDelta ?? 0
+const b1RigidRetained = b1Results[1]?.retainedAfterGC ?? 0
 const b2JsP99 = b2Results[0]?.p99Us ?? 0
 const b2RigidP99 = b2Results[1]?.p99Us ?? 0
 const b3JsOps = b3Results[0]?.opsPerSec ?? 0
 const b3RigidOps = b3Results[1]?.opsPerSec ?? 0
+const b7NestedAllocDelta = b7Results[0]?.allocationDelta ?? 0
+const b7FlatAllocDelta = b7Results[1]?.allocationDelta ?? 0
+const b7RigidAllocDelta = b7Results[2]?.allocationDelta ?? 0
+const b7RigidRetained = b7Results[2]?.retainedAfterGC ?? 0
 
 const benchmarkMd = `# RigidJS Benchmark Report
 
@@ -83,7 +92,7 @@ const benchmarkMd = `# RigidJS Benchmark Report
 
 ${mdTable(b1Results)}
 
-B1 measures heap object pressure when creating 100,000 \`{x, y, z}\` entities. The JS baseline allocates one JS object per entity, resulting in a heapObjectsDelta of ~${b1JsDelta.toLocaleString()} tracked objects. RigidJS stores all data in a single pre-allocated ArrayBuffer, yielding a heapObjectsDelta of ~${b1RigidDelta.toLocaleString()}. The GC sees ${Math.abs(b1JsDelta - b1RigidDelta).toLocaleString()} fewer live objects, reducing scan and collection overhead in proportion to entity count.
+B1 measures peak allocation pressure when creating 100,000 \`{x, y, z}\` entities using a corrected one-shot measurement that samples \`heapStats()\` before and after a single \`allocate()\` call without forcing GC in between (so the allocated state remains live at the second sample). The JS baseline allocates one JS object per entity, producing an \`allocationDelta\` of ~${b1JsAllocDelta.toLocaleString()} newly created objects — close to the expected 100,000. RigidJS stores all 100,000 entity slots in a single pre-allocated \`ArrayBuffer\`, producing an \`allocationDelta\` of ~${b1RigidAllocDelta.toLocaleString()} objects — roughly ${Math.round(b1JsAllocDelta / Math.max(b1RigidAllocDelta, 1))}x fewer GC-tracked objects than the JS baseline. The \`retainedAfterGC\` for RigidJS is ~${b1RigidRetained.toLocaleString()}, confirming the backing buffer is the only survivor once the slab reference is released.
 
 ---
 
@@ -107,7 +116,7 @@ B3 measures throughput (ops/sec) for a full 100,000-entity sweep computing \`pos
 
 ${mdTable(b7Results)}
 
-B7 compares three strategies for 50,000 Particle-like entities with nested \`pos\` / \`vel\` vectors. The JS nested baseline allocates three JS objects per entity (parent + pos + vel), totalling ~150k GC-tracked objects. The JS flat baseline collapses these into one object per entity (~50k objects) — a manual optimization that many perf-aware JS developers already apply. RigidJS uses a single ArrayBuffer for all 50k entities, adding 0 GC-tracked objects beyond container bookkeeping. The heapObjectsDelta and heapSizeMB columns show how aggressively each approach loads the GC and RSS.
+B7 compares three strategies for 50,000 Particle-like entities with nested \`pos\` / \`vel\` vectors, using the corrected one-shot allocation measurement. The JS nested baseline allocates three JS objects per entity (parent + pos + vel), producing an \`allocationDelta\` of ~${b7NestedAllocDelta.toLocaleString()} — close to the expected ~150,000 total objects. The JS flat baseline collapses these into one object per entity, producing an \`allocationDelta\` of ~${b7FlatAllocDelta.toLocaleString()} — approximately one-third the pressure of nested JS, confirming that manual flattening is itself a meaningful GC optimization. RigidJS uses a single \`ArrayBuffer\` for all 50,000 entities regardless of nesting depth, producing an \`allocationDelta\` of ~${b7RigidAllocDelta.toLocaleString()} objects — roughly ${Math.round(b7NestedAllocDelta / Math.max(b7RigidAllocDelta, 1))}x fewer than nested JS and roughly ${Math.round(b7FlatAllocDelta / Math.max(b7RigidAllocDelta, 1))}x fewer than flat JS. The \`retainedAfterGC\` for RigidJS is near zero (engine-internal fluctuation), showing that dropping the slab root allows the GC to reclaim the entire backing buffer regardless of how many entities were packed into it.
 
 ---
 

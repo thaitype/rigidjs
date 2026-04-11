@@ -3,7 +3,7 @@ import type { Scenario } from '../harness.js'
 
 // ---------------------------------------------------------------------------
 // B1 — Struct creation: 100k entities
-// Key metric: heapObjectsDelta
+// Key metric: heapObjectsDelta, allocationDelta
 // ---------------------------------------------------------------------------
 
 const b1JsBaseline: Scenario = {
@@ -16,6 +16,13 @@ const b1JsBaseline: Scenario = {
     for (let i = 0; i < 100_000; i++) {
       arr[i] = { x: i, y: i, z: i }
     }
+  },
+  allocate(): unknown {
+    const arr = new Array<{ x: number; y: number; z: number }>(100_000)
+    for (let i = 0; i < 100_000; i++) {
+      arr[i] = { x: i, y: i, z: i }
+    }
+    return arr
   },
   iterations: 10,
   warmup: 2,
@@ -36,6 +43,20 @@ const b1RigidJs: Scenario = {
       h.z = i
     }
     s.drop()
+  },
+  allocate(): unknown {
+    const Vec3 = struct({ x: 'f64', y: 'f64', z: 'f64' })
+    const s = slab(Vec3, 100_000)
+    for (let i = 0; i < 100_000; i++) {
+      const h = s.insert()
+      h.x = i
+      h.y = i
+      h.z = i
+    }
+    // Do NOT call s.drop() here — harness needs the slab live for heapAfter sample.
+    // The harness releases the reference via retained = null, after which the
+    // backing ArrayBuffer becomes collectable.
+    return s
   },
   iterations: 10,
   warmup: 2,
