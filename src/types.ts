@@ -28,7 +28,7 @@ export interface StructDef<F extends StructFields> {
   readonly sizeof: number
   readonly fields: F
   /** @internal Generated handle constructor — implementation detail. */
-  readonly _Handle?: new (view: DataView, baseOffset: number) => object
+  readonly _Handle?: new (view: DataView, baseOffset: number, slot: number) => object
   /** @internal Offset table — implementation detail. */
   readonly _offsets?: ReadonlyMap<string, { offset: number; type: FieldType }>
 }

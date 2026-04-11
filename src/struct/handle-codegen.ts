@@ -21,7 +21,7 @@ const DATAVIEW_METHODS: Record<NumericType, { get: string; set: string }> = {
  * Internal — not part of the public contract.
  */
 export interface HandleConstructor {
-  new (view: DataView, baseOffset: number): object
+  new (view: DataView, baseOffset: number, slot: number): object
 }
 
 /**
@@ -37,7 +37,7 @@ interface NestedFieldDesc {
   offset: number
   /** The handle constructor for the nested struct, produced by a prior generateHandleClass call. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- opaque generated class, any is isolated here
-  ChildHandle: new (view: DataView, baseOffset: number) => any
+  ChildHandle: new (view: DataView, baseOffset: number, slot: number) => any
 }
 
 /**
@@ -92,19 +92,24 @@ export function generateHandleClass(
   const paramNames = nestedFields.map(f => `_C_${f.name}`)
 
   // --- Constructor body ---
-  // Sets _v (DataView) and _o (base offset).
-  // For each nested field: allocates sub-handle once at construction time.
-  let ctorBody = `this._v=v;this._o=o;\n`
+  // Sets _v (DataView), _o (base offset), and _slot (internal slot index).
+  // _slot is a raw instance property — not exposed via a getter.
+  // Tests may access it via (h as any)._slot.
+  // Sub-handles receive slot=0 because only the top-level handle returned
+  // to the user carries meaningful slot semantics.
+  let ctorBody = `this._v=v;this._o=o;this._slot=s;\n`
   for (const { name, offset } of nestedFields) {
-    // `new _C_<name>(v, o + <offset>)` — allocation happens ONCE in the constructor.
-    ctorBody += `this._sub_${name}=new _C_${name}(v,o+${offset});\n`
+    // `new _C_<name>(v, o + <offset>, 0)` — allocation happens ONCE in the constructor.
+    // Pass 0 for the sub-handle slot argument to keep the constructor signature uniform.
+    ctorBody += `this._sub_${name}=new _C_${name}(v,o+${offset},0);\n`
   }
 
   // --- _rebase method ---
-  // Updates _v and _o, then rebases each sub-handle recursively.
-  let rebaseBody = `this._v=v;this._o=o;\n`
+  // Updates _v, _o, and _slot, then rebases each sub-handle recursively.
+  // Sub-handles are rebased with slot=0 (only top-level slot is meaningful).
+  let rebaseBody = `this._v=v;this._o=o;this._slot=s;\n`
   for (const { name, offset } of nestedFields) {
-    rebaseBody += `this._sub_${name}._rebase(v,o+${offset});\n`
+    rebaseBody += `this._sub_${name}._rebase(v,o+${offset},0);\n`
   }
   rebaseBody += `return this;\n`
 
@@ -133,8 +138,8 @@ export function generateHandleClass(
   const factoryParams = paramNames.length > 0 ? paramNames.join(',') : ''
   const factoryBody = [
     `return class Handle{`,
-    `constructor(v,o){${ctorBody}}`,
-    `_rebase(v,o){${rebaseBody}}`,
+    `constructor(v,o,s){${ctorBody}}`,
+    `_rebase(v,o,s){${rebaseBody}}`,
     accessorBody,
     `}`,
   ].join('\n')

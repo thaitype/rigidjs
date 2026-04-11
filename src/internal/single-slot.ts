@@ -36,7 +36,7 @@ export function createSingleSlot<F extends StructFields>(def: StructDef<F>): Sin
   // This is an intentional boundary — the generated class has no static
   // TS type; `any` is isolated to this one call site.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handle = new (def._Handle as any)(view, 0) as InstanceType<NonNullable<StructDef<F>['_Handle']>>
+  const handle = new (def._Handle as any)(view, 0, 0) as InstanceType<NonNullable<StructDef<F>['_Handle']>>
 
   return { handle, view, buffer }
 }
