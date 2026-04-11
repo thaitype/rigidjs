@@ -12,7 +12,7 @@ import { heapStats } from 'bun:jsc'
  * and reflects the actual current live counts. Summing it gives a live total
  * that correctly captures peak allocation pressure between GC calls.
  */
-function liveObjectCount(stats: ReturnType<typeof heapStats>): number {
+export function liveObjectCount(stats: ReturnType<typeof heapStats>): number {
   let total = 0
   for (const count of Object.values(stats.objectTypeCounts)) {
     total += count
@@ -230,6 +230,265 @@ export function formatTable(results: BenchResult[]): string {
       pad(r.rssMB.toFixed(2), COL_RSS, true),
       pad(r.p50Us.toFixed(2), COL_P50, true),
       pad(r.p99Us.toFixed(2), COL_P99, true),
+    ].join('  '),
+  )
+
+  return [header, sep, ...rows].join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Sustained-load types
+// ---------------------------------------------------------------------------
+
+export interface SustainedScenario {
+  name: string
+  setup?: () => void
+  tick: () => void
+  teardown?: () => void
+  /** Wall-clock duration budget in milliseconds. */
+  durationMs: number
+  /** Number of ticks to run untimed before measurement (default 50). */
+  warmupTicks?: number
+  /**
+   * Optional one-shot allocation measurement, same contract as Scenario.allocate
+   * from task-8. If present, the harness runs it once before the timing window
+   * and records allocationDelta. If absent, allocationDelta is null.
+   */
+  allocate?: () => unknown
+}
+
+export interface SustainedResult {
+  name: string
+  /** Capacity tag for B9 scaling runs; undefined for plain B8. */
+  capacity?: number
+  ticksCompleted: number
+  meanTickMs: number
+  stdDevTickMs: number
+  p50TickMs: number
+  p99TickMs: number
+  p999TickMs: number
+  maxTickMs: number
+  /** Optional one-shot allocation pressure from scenario.allocate(). */
+  allocationDelta: number | null
+  heapSizeMB: number
+  rssMB: number
+}
+
+// ---------------------------------------------------------------------------
+// benchSustained — time-budgeted sustained tick benchmark
+// ---------------------------------------------------------------------------
+
+export async function benchSustained(scenario: SustainedScenario): Promise<SustainedResult> {
+  const warmupTicks = scenario.warmupTicks ?? 50
+
+  // 1. Setup
+  scenario.setup?.()
+
+  // 2. Optional one-shot allocation measurement phase
+  let allocationDelta: number | null = null
+
+  if (scenario.allocate !== undefined) {
+    // Force GC for clean slate
+    Bun.gc(true)
+    await Bun.sleep(100)
+
+    const beforeStats = heapStats()
+    const beforeLive = liveObjectCount(beforeStats)
+
+    // One-shot allocation — declared as let so retained = null below is a real write
+    let retained: unknown = scenario.allocate()
+
+    // Sample after with no GC/sleep between so we see the live peak
+    const afterStats = heapStats()
+    const afterLive = liveObjectCount(afterStats)
+
+    // Anti-DCE: pin retained through the heapAfter sample so the JIT cannot
+    // observe it as dead and collect it before heapStats() runs
+    void retained
+
+    allocationDelta = afterLive - beforeLive
+
+    retained = null
+    Bun.gc(true)
+    await Bun.sleep(100)
+  }
+
+  // 3. GC + sleep before warmup
+  Bun.gc(true)
+  await Bun.sleep(100)
+
+  // 4. Warmup — prime JIT without timing
+  for (let i = 0; i < warmupTicks; i++) scenario.tick()
+
+  // 5. GC + sleep before measurement window
+  Bun.gc(true)
+  await Bun.sleep(100)
+
+  // 6. Pre-size latency buffer — hard cap at Math.ceil(durationMs * 100) entries.
+  //    Spec originally specified durationMs * 2 (~2000 ticks/sec headroom), but
+  //    on Apple M-series hardware small-capacity scenarios complete ticks in
+  //    <0.025ms (>40000 ticks/sec), so the multiplier is bumped to 100
+  //    (~100000 ticks/sec ceiling) to keep the "plenty of headroom" intent
+  //    intact across all B8/B9 capacities. Throw on overflow rather than
+  //    silently grow or truncate.
+  const maxTicks = Math.ceil(scenario.durationMs * 100)
+  const latencies = new Float64Array(maxTicks)
+  let ticksCompleted = 0
+
+  // 7 + 8. Timing loop with runaway guard
+  const windowStart = Bun.nanoseconds()
+  const deadline = windowStart + scenario.durationMs * 1_000_000
+  const runawayCeiling = windowStart + scenario.durationMs * 3 * 1_000_000
+
+  while (Bun.nanoseconds() < deadline) {
+    if (Bun.nanoseconds() >= runawayCeiling) {
+      throw new Error(
+        `[benchSustained] Runaway guard triggered for scenario "${scenario.name}": ` +
+          `loop exceeded ${scenario.durationMs * 3}ms wall time. ` +
+          `Ticks completed so far: ${ticksCompleted}.`,
+      )
+    }
+    if (ticksCompleted >= maxTicks) {
+      throw new Error(
+        `[benchSustained] Latency buffer overflow for scenario "${scenario.name}": ` +
+          `tick count ${ticksCompleted} exceeds pre-sized buffer cap of ${maxTicks} ` +
+          `(Math.ceil(durationMs * 100) = Math.ceil(${scenario.durationMs} * 100)).`,
+      )
+    }
+    const t0 = Bun.nanoseconds()
+    scenario.tick()
+    latencies[ticksCompleted] = Bun.nanoseconds() - t0
+    ticksCompleted++
+  }
+
+  // 9. Teardown
+  scenario.teardown?.()
+
+  // 10. GC + sleep, then sample heap
+  Bun.gc(true)
+  await Bun.sleep(100)
+  const finalStats = heapStats()
+  const heapSizeMB = +(finalStats.heapSize / 1024 / 1024).toFixed(2)
+  const rssMB = +(process.memoryUsage().rss / 1024 / 1024).toFixed(2)
+
+  // 11. Compute statistics from filled prefix — convert ns → ms
+  const used = latencies.subarray(0, ticksCompleted)
+
+  let sum = 0
+  for (let i = 0; i < ticksCompleted; i++) sum += used[i]!
+  const meanNs = sum / ticksCompleted
+  const meanTickMs = +(meanNs / 1_000_000).toFixed(4)
+
+  let variance = 0
+  for (let i = 0; i < ticksCompleted; i++) {
+    const diff = used[i]! - meanNs
+    variance += diff * diff
+  }
+  const stdDevTickMs = +(Math.sqrt(variance / ticksCompleted) / 1_000_000).toFixed(4)
+
+  // Sort a copy for percentile computation
+  const sorted = new Float64Array(used)
+  sorted.sort()
+  const n = ticksCompleted
+  const p50TickMs = +(sorted[Math.floor(n * 0.5)]! / 1_000_000).toFixed(4)
+  const p99TickMs = +(sorted[Math.floor(n * 0.99)]! / 1_000_000).toFixed(4)
+  const p999TickMs = +(sorted[Math.floor(n * 0.999)]! / 1_000_000).toFixed(4)
+  const maxTickMs = +(sorted[n - 1]! / 1_000_000).toFixed(4)
+
+  // 12. Return result — capacity left undefined unless set by benchScaling
+  return {
+    name: scenario.name,
+    ticksCompleted,
+    meanTickMs,
+    stdDevTickMs,
+    p50TickMs,
+    p99TickMs,
+    p999TickMs,
+    maxTickMs,
+    allocationDelta,
+    heapSizeMB,
+    rssMB,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// benchScaling — run a scenario factory across multiple capacities
+// ---------------------------------------------------------------------------
+
+export async function benchScaling<T extends SustainedScenario>(
+  scenarioFactory: (capacity: number) => T,
+  capacities: number[],
+): Promise<SustainedResult[]> {
+  const results: SustainedResult[] = []
+  for (const capacity of capacities) {
+    Bun.gc(true)
+    await Bun.sleep(100)
+    const scenario = scenarioFactory(capacity)
+    const result = await benchSustained(scenario)
+    result.capacity = capacity
+    results.push(result)
+  }
+  return results
+}
+
+// ---------------------------------------------------------------------------
+// formatSustainedTable — plain-text fixed-width table for sustained results
+// ---------------------------------------------------------------------------
+
+export function formatSustainedTable(results: SustainedResult[]): string {
+  const COL_NAME = 36
+  const COL_CAP = 10
+  const COL_TICKS = 8
+  const COL_MEAN = 10
+  const COL_P50 = 10
+  const COL_P99 = 10
+  const COL_P999 = 10
+  const COL_MAX = 10
+  const COL_ALLOC = 10
+  const COL_HEAP = 9
+  const COL_RSS = 9
+
+  function pad(s: string, n: number, right = false): string {
+    return right ? s.padStart(n) : s.padEnd(n)
+  }
+
+  function fmtCap(v: number | undefined): string {
+    return v === undefined ? '-' : v.toLocaleString()
+  }
+
+  function fmtAlloc(v: number | null): string {
+    return v === null ? '-' : v.toLocaleString()
+  }
+
+  const header = [
+    pad('name', COL_NAME),
+    pad('cap', COL_CAP, true),
+    pad('ticks', COL_TICKS, true),
+    pad('meanMs', COL_MEAN, true),
+    pad('p50Ms', COL_P50, true),
+    pad('p99Ms', COL_P99, true),
+    pad('p999Ms', COL_P999, true),
+    pad('maxMs', COL_MAX, true),
+    pad('allocΔ', COL_ALLOC, true),
+    pad('heapMB', COL_HEAP, true),
+    pad('rssMB', COL_RSS, true),
+  ].join('  ')
+
+  const sep = '-'.repeat(header.length)
+
+  const rows = results.map((r) =>
+    [
+      pad(r.name, COL_NAME),
+      pad(fmtCap(r.capacity), COL_CAP, true),
+      pad(r.ticksCompleted.toLocaleString(), COL_TICKS, true),
+      pad(r.meanTickMs.toFixed(4), COL_MEAN, true),
+      pad(r.p50TickMs.toFixed(4), COL_P50, true),
+      pad(r.p99TickMs.toFixed(4), COL_P99, true),
+      pad(r.p999TickMs.toFixed(4), COL_P999, true),
+      pad(r.maxTickMs.toFixed(4), COL_MAX, true),
+      pad(fmtAlloc(r.allocationDelta), COL_ALLOC, true),
+      pad(r.heapSizeMB.toFixed(2), COL_HEAP, true),
+      pad(r.rssMB.toFixed(2), COL_RSS, true),
     ].join('  '),
   )
 

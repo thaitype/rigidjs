@@ -1,0 +1,123 @@
+{
+  "meta": {
+    "bunVersion": "1.3.8",
+    "platform": "darwin",
+    "arch": "arm64",
+    "date": "2026-04-11T17:22:52.853Z",
+    "xlEnabled": false
+  },
+  "b8": [
+    {
+      "name": "B8 JS baseline (100k, 1k churn/tick, 10s)",
+      "ticksCompleted": 51892,
+      "meanTickMs": 0.1926,
+      "stdDevTickMs": 0.1285,
+      "p50TickMs": 0.1755,
+      "p99TickMs": 0.4523,
+      "p999TickMs": 0.9288,
+      "maxTickMs": 18.3151,
+      "allocationDelta": null,
+      "heapSizeMB": 42.65,
+      "rssMB": 254.66
+    },
+    {
+      "name": "B8 RigidJS slab (100k, 1k churn/tick, 10s)",
+      "ticksCompleted": 54613,
+      "meanTickMs": 0.183,
+      "stdDevTickMs": 0.0558,
+      "p50TickMs": 0.1755,
+      "p99TickMs": 0.3429,
+      "p999TickMs": 0.6348,
+      "maxTickMs": 5.7866,
+      "allocationDelta": null,
+      "heapSizeMB": 42.69,
+      "rssMB": 105.38
+    }
+  ],
+  "b9": [
+    {
+      "name": "b9-js-cap10000",
+      "ticksCompleted": 98974,
+      "meanTickMs": 0.0201,
+      "stdDevTickMs": 0.0261,
+      "p50TickMs": 0.0168,
+      "p99TickMs": 0.0785,
+      "p999TickMs": 0.2631,
+      "maxTickMs": 3.8455,
+      "allocationDelta": null,
+      "heapSizeMB": 37.51,
+      "rssMB": 134.05,
+      "capacity": 10000
+    },
+    {
+      "name": "b9-rigid-cap10000",
+      "ticksCompleted": 49305,
+      "meanTickMs": 0.0405,
+      "stdDevTickMs": 0.0043,
+      "p50TickMs": 0.0393,
+      "p99TickMs": 0.0579,
+      "p999TickMs": 0.1018,
+      "maxTickMs": 0.1343,
+      "allocationDelta": null,
+      "heapSizeMB": 37.37,
+      "rssMB": 524.56,
+      "capacity": 10000
+    },
+    {
+      "name": "b9-js-cap100000",
+      "ticksCompleted": 8928,
+      "meanTickMs": 0.2239,
+      "stdDevTickMs": 0.0661,
+      "p50TickMs": 0.212,
+      "p99TickMs": 0.5182,
+      "p999TickMs": 0.9916,
+      "maxTickMs": 1.9255,
+      "allocationDelta": null,
+      "heapSizeMB": 45.04,
+      "rssMB": 248.47,
+      "capacity": 100000
+    },
+    {
+      "name": "b9-rigid-cap100000",
+      "ticksCompleted": 4682,
+      "meanTickMs": 0.4271,
+      "stdDevTickMs": 0.0253,
+      "p50TickMs": 0.4217,
+      "p99TickMs": 0.5416,
+      "p999TickMs": 0.7073,
+      "maxTickMs": 0.9891,
+      "allocationDelta": null,
+      "heapSizeMB": 43.42,
+      "rssMB": 495.95,
+      "capacity": 100000
+    },
+    {
+      "name": "b9-js-cap1000000",
+      "ticksCompleted": 730,
+      "meanTickMs": 2.7397,
+      "stdDevTickMs": 0.6309,
+      "p50TickMs": 2.7113,
+      "p99TickMs": 4.2649,
+      "p999TickMs": 7.0963,
+      "maxTickMs": 7.0963,
+      "allocationDelta": null,
+      "heapSizeMB": 120.54,
+      "rssMB": 619.56,
+      "capacity": 1000000
+    },
+    {
+      "name": "b9-rigid-cap1000000",
+      "ticksCompleted": 470,
+      "meanTickMs": 4.2607,
+      "stdDevTickMs": 0.1257,
+      "p50TickMs": 4.2277,
+      "p99TickMs": 4.8658,
+      "p999TickMs": 5.5568,
+      "maxTickMs": 5.5568,
+      "allocationDelta": null,
+      "heapSizeMB": 105.33,
+      "rssMB": 453.84,
+      "capacity": 1000000
+    }
+  ]
+}
