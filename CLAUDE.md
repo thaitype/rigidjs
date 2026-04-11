@@ -338,30 +338,63 @@ Maximum clarity and safety.
 
 ## Development Commands
 
-> Command to run during development and testing.
-> Adjust as needed for your environment.
-> TODO: Add Your specific commands here.
+```bash
+bun install        # install dependencies
+bun test           # run unit tests (bun:test)
+bun run typecheck  # tsc --noEmit (strict)
+```
+
+Definition of done for any task: `bun test` passes AND `bun run typecheck` passes. See `.chief/_rules/_verification/` for details.
 
 ## Architecture Overview
 
-> A brief overview of the architecture, key patterns, and important rules.
-> TODO: Fill in with your project's architecture details.
+RigidJS provides Rust-inspired memory primitives for JavaScript: `struct`, `slab`, `vec`, `bump`, `.iter()`, `.drop()`. Data lives in contiguous `ArrayBuffer` memory instead of JS objects, eliminating GC pressure and hidden-class deopts in hot paths.
+
+The authoritative product specification is `.chief/_rules/_goal/rigidjs-design-spec-v3.md`. Read it before making API or layout decisions.
 
 ### Tech Stack
 
-> List of major technologies used in the project.
+- **Runtime:** Bun (JavaScriptCore)
+- **Language:** TypeScript 5, strict mode, ESM only (`"type": "module"`)
+- **Test runner:** `bun:test`
+- **Memory primitives:** `ArrayBuffer`, `DataView`, typed arrays
+- **Bun APIs (as needed):** `bun:jsc` (heap stats), `Bun.nanoseconds()` (benchmarks)
+- **No runtime dependencies.** Dev-only: `@types/bun`, `typescript`.
 
 ### Key Architectural Patterns
 
-> Description of important architectural patterns (e.g., Repository Pattern, Service Layer, etc.)
-> TODO: Fill in with your project's architectural patterns.
+1. **Blueprint vs allocation separation.** `struct()` is only a type definition — it allocates no memory. Containers (`slab`, `vec`, `bump`) own the `ArrayBuffer`.
+2. **Code-generated handles.** Per-struct accessor classes are generated at `struct()` call time using `new Function()` (Elysia Sucrose style). No `Proxy`, no per-access closure — JIT-inlineable DataView reads/writes at computed offsets.
+3. **DataView for mixed types.** All field reads/writes go through a single `DataView` over the container's `ArrayBuffer`. Unaligned access is allowed — no padding between fields.
+4. **Declaration-order layout.** Fields are laid out in the exact order declared. No reordering, no padding. `sizeof` is the sum of field sizes.
+5. **Nested structs inline.** A struct field embedded in another struct occupies `sizeof(inner)` bytes at the parent's offset — not a pointer.
+6. **Deterministic `.drop()`.** Containers release their buffer explicitly. Use after drop throws.
 
 ### Directory Structure
 
-> The main directory structure of the project
-> TODO: Fill in with your project's directory structure.
+```
+rigidjs/
+├── CLAUDE.md                 # highest-authority rules (this file)
+├── .chief/                   # Chief Agent Framework state
+│   ├── _rules/               # global rules (_standard, _goal, _contract, _verification)
+│   └── milestone-N/          # per-milestone goal, contract, plan, report
+├── src/                      # library source
+│   └── index.ts              # public entry — re-exports public API only
+├── tests/                    # bun:test unit tests mirroring src/
+├── examples/                 # runnable usage examples
+├── package.json
+└── tsconfig.json
+```
+
+Subdirectories under `src/` are added per milestone (e.g., `src/struct/`). Do not introduce top-level source directories outside `src/`.
 
 ### Important Development Rules
 
-> Key rules that developers must follow.
-> TODO: Fill in with your project's important development rules.
+1. **No hidden allocations in hot paths.** Handle accessors, container methods (`insert`, `push`, `alloc`, `get`), and iterators must not allocate JS objects per call. Allocate once at container creation and reuse.
+2. **No `Proxy` for handles.** Use `new Function()` code generation. Proxies defeat JIT inlining.
+3. **Strict TypeScript.** No `any` in public API. Use generics to propagate struct field types to handle accessors so `slab(Vec3).insert().x` is typed as `number`.
+4. **ESM only.** No CommonJS. No default exports for library API — named exports only.
+5. **Public API is append-only within a milestone.** Never rename or remove a symbol listed in `.chief/_rules/_contract/` or `.chief/milestone-N/_contract/` without chief-agent approval.
+6. **Tests co-locate by feature.** Place tests in `tests/<feature>.test.ts`. Every public API symbol must have at least one correctness test.
+7. **No runtime dependencies.** RigidJS stays dependency-free. Anything outside `bun:*` and JS built-ins requires chief-agent approval.
+8. **Do not edit `.chief/_rules/_goal/rigidjs-design-spec-v3.md`.** It is the product north star. Propose changes via chief-agent if a gap is found.
