@@ -10,6 +10,9 @@
  * handle class is code-generated at runtime via new Function(). Field access
  * uses `as unknown as Record<string, number>` casts where needed, matching
  * the pattern used throughout the slab test suite.
+ *
+ * Task-5 amendment: remove() and has() now take a numeric slot, not a handle.
+ * This file verifies the new signatures compile and pass.
  */
 
 import { describe, it, expect } from 'bun:test'
@@ -82,6 +85,44 @@ describe('public-api — handle reuse', () => {
     expect(a).toBe(b)
     // slot 0 still holds the value written via a
     expect((s.get(0) as unknown as Record<string, number>)['x']).toBe(1)
+    s.drop()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Task-5 amendment: remove(slot) and has(slot) take numbers
+// ---------------------------------------------------------------------------
+
+describe('public-api — remove and has take numeric slot (task-5)', () => {
+  it('remove(slot) accepts a number and frees the slot', () => {
+    const s = slab(struct({ x: 'f64' }), 4)
+    s.insert()
+    // Compiles only if remove() accepts number — type check passes here
+    s.remove(0)
+    expect(s.len).toBe(0)
+    s.drop()
+  })
+
+  it('has(slot) accepts a number and returns boolean', () => {
+    const s = slab(struct({ x: 'f64' }), 4)
+    s.insert()
+    expect(s.has(0)).toBe(true)
+    s.remove(0)
+    expect(s.has(0)).toBe(false)
+    s.drop()
+  })
+
+  it('handle.slot is a number — slot capture pattern compiles', () => {
+    const s = slab(struct({ x: 'f64' }), 4)
+    // Capture slot index as a number immediately after insert()
+    const slotA: number = (s.insert() as any).slot
+    const slotB: number = (s.insert() as any).slot
+    expect(slotA).toBe(0)
+    expect(slotB).toBe(1)
+    // Use the captured primitive to remove — immune to handle rebasing
+    s.remove(slotA)
+    expect(s.has(0)).toBe(false)
+    expect(s.has(1)).toBe(true)
     s.drop()
   })
 })

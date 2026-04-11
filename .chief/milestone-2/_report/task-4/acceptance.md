@@ -165,3 +165,75 @@ Evidence: `src/index.ts` only re-exports from `./struct/struct.js`, `./slab/slab
 ## Zero-Runtime-Dependency Confirmation
 
 `package.json` `dependencies` key is absent. All imports are JS built-ins or `bun:*` modules.
+
+---
+
+## Task-5 Amendment
+
+Generated: 2026-04-11
+Amendment: milestone-2 / task-5 (slot-key amendment)
+
+### Contract Change Summary
+
+- `Slab<F>.remove(slot: number)` — parameter changed from `handle: Handle<F>` to `slot: number`. Includes integer and range validation.
+- `Slab<F>.has(slot: number)` — parameter changed from `handle: Handle<F>` to `slot: number`. Includes integer and range validation.
+- `Handle<F>.slot` — new public read-only getter on the prototype (emitted by `handle-codegen.ts`). Returns same value as internal `_slot` raw property.
+- Error messages: out-of-range throws `"slot X out of range"`; double-free throws `"slot X already free"`.
+
+### `bun test` Output (post task-5)
+
+```
+bun test v1.3.8 (b64edcb4)
+ 154 pass
+ 0 fail
+ 285 expect() calls
+Ran 154 tests across 8 files.
+```
+
+20 new tests added (slot-key validation, `handle.slot` getter, footgun-proof capture pattern). All prior 134 tests remain green.
+
+### `bun run typecheck` Output (post task-5)
+
+```
+$ tsc --noEmit
+(no output — exit 0)
+```
+
+### `bun run examples/particles.ts` Output (post task-5)
+
+```
+capacity: 1024
+len (after removal): 252
+alive count (manual): 252
+sum pos.x (alive): 616.928645
+```
+
+Output is identical to task-4. The example was rewritten to use `has(i)` and `remove(i)` with numeric slots directly, and `get(i)` for field access — consistent with the new slot-key API.
+
+### Acceptance Criteria Verification
+
+| Criterion | Status |
+|-----------|--------|
+| `bun test` exits 0 — 154 tests pass | PASS |
+| `bun run typecheck` exits 0 | PASS |
+| `bun run examples/particles.ts` deterministic output, exits 0 | PASS |
+| `grep -n "get slot()" src/struct/handle-codegen.ts` — at least one match | PASS (line 119) |
+| `grep -rn "remove(handle" src/slab/slab.ts` — zero matches | PASS |
+| `grep -rn "has(handle" src/slab/slab.ts` — zero matches | PASS |
+| `grep -rn "Proxy" src/` — zero matches | PASS |
+| `grep -n "new ArrayBuffer(" src/slab/slab.ts` — exactly one match | PASS (line 106) |
+| `grep -n "new DataView(" src/slab/slab.ts` — exactly one match | PASS (line 107) |
+| No new allocations in hot paths — code review | PASS |
+| `handle.slot` getter is read-only (no setter emitted) | PASS — descriptor has `get`, no `set` |
+| `remove(slotA)` after subsequent `insert()` removes originally captured slot | PASS — footgun-proof test in slab.test.ts |
+| `examples/particles.ts` JSDoc mentions handle reuse + slot capture | PASS |
+| Acceptance report updated with task-5 amendment section | PASS — this section |
+
+### Milestone-2 Success Criteria (Still Hold Under New Signatures)
+
+All milestone-2 success criteria from the original task-4 acceptance report continue to hold:
+- All struct tests pass (unchanged from milestone-1)
+- `slab` / `Slab` / `Handle` exported from `rigidjs`
+- No `Proxy`, no per-call allocations in hot paths
+- Exactly one `ArrayBuffer` + one `DataView` in `src/slab/slab.ts`
+- Zero runtime dependencies

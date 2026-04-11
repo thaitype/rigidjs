@@ -113,6 +113,11 @@ export function generateHandleClass(
   }
   rebaseBody += `return this;\n`
 
+  // --- Public slot getter ---
+  // Exposes this._slot as a read-only getter. No setter is emitted — assignment is a no-op at runtime
+  // and a type error at compile time (readonly slot: number on Handle<F>).
+  const slotGetterBody = `get slot(){return this._slot}\n`
+
   // --- Field accessors ---
   let accessorBody = ''
   for (const [name, fieldType] of Object.entries(fields)) {
@@ -140,6 +145,7 @@ export function generateHandleClass(
     `return class Handle{`,
     `constructor(v,o,s){${ctorBody}}`,
     `_rebase(v,o,s){${rebaseBody}}`,
+    slotGetterBody,
     accessorBody,
     `}`,
   ].join('\n')

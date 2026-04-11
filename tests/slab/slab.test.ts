@@ -1,5 +1,5 @@
 /**
- * Tests for src/slab/slab.ts — milestone-2 task-3.
+ * Tests for src/slab/slab.ts — milestone-2 task-3 / task-5 amendment.
  *
  * Covers:
  *   - construction / validation
@@ -10,9 +10,13 @@
  *   - clear()
  *   - drop()
  *   - error paths
- *   - has()
+ *   - has() — now takes slot number
+ *   - remove() — now takes slot number
+ *   - slot-key validation (integer, range, NaN)
  *   - nested struct (Particle)
  *   - no premature public export from src/index.ts
+ *   - handle.slot public getter
+ *   - footgun-proof slot capture pattern
  */
 
 import { describe, it, expect } from 'bun:test'
@@ -171,17 +175,13 @@ describe('slab — handle reuse semantics', () => {
 
 describe('slab — slot recycling', () => {
   it('freed slot is reused on next insert (LIFO free-list)', () => {
-    // NOTE: The handle is a shared instance — insert() and get() both rebase it.
-    // To remove a specific slot after the handle has been rebased elsewhere,
-    // use get(targetSlot) to rebase the handle back before calling remove().
-    //
-    // Scenario: insert slot 0, insert slot 1, remove slot 0, insert → gets slot 0 back.
+    // Use slot numbers directly to avoid shared-handle confusion.
     const s = slab(Vec3, 2)
-    s.insert() // fills slot 0 — handle now at slot 0
-    s.insert() // fills slot 1 — handle rebased to slot 1
+    s.insert() // fills slot 0
+    s.insert() // fills slot 1
 
-    // Rebase handle to slot 0 and remove it
-    s.remove(s.get(0)) // frees slot 0
+    // Remove slot 0 by its numeric index
+    s.remove(0) // frees slot 0
     expect(s.len).toBe(1)
 
     // Next insert should recycle slot 0 (LIFO — slot 0 was just freed)
@@ -195,10 +195,9 @@ describe('slab — slot recycling', () => {
     s.insert() // slot 0
     s.insert() // slot 1
     expect(s.len).toBe(2)
-    // Remove each slot via get() to avoid shared-handle confusion
-    s.remove(s.get(0))
+    s.remove(0)
     expect(s.len).toBe(1)
-    s.remove(s.get(1))
+    s.remove(1)
     expect(s.len).toBe(0)
   })
 })
@@ -277,10 +276,9 @@ describe('slab — drop()', () => {
 
   it('drop() then remove() throws "slab has been dropped"', () => {
     const s = slab(Vec3, 5)
-    // Insert before drop so we have a handle
-    const h = s.insert()
+    s.insert()
     s.drop()
-    expect(() => s.remove(h)).toThrow('slab has been dropped')
+    expect(() => s.remove(0)).toThrow('slab has been dropped')
   })
 
   it('drop() then get() throws "slab has been dropped"', () => {
@@ -291,9 +289,9 @@ describe('slab — drop()', () => {
 
   it('drop() then has() throws "slab has been dropped"', () => {
     const s = slab(Vec3, 5)
-    const h = s.insert()
+    s.insert()
     s.drop()
-    expect(() => s.has(h)).toThrow('slab has been dropped')
+    expect(() => s.has(0)).toThrow('slab has been dropped')
   })
 
   it('drop() then .len throws "slab has been dropped"', () => {
@@ -352,41 +350,156 @@ describe('slab — error paths', () => {
     expect(() => s.get(NaN)).toThrow('slab: index out of range')
   })
 
-  it('double remove throws "slab: double remove at slot 0"', () => {
+  it('double remove throws "slot 0 already free"', () => {
     const s = slab(Vec3, 5)
-    const h = s.insert()
-    expect((h as any)._slot).toBe(0)
-    s.remove(h)
-    expect(() => s.remove(h)).toThrow(/slab: double remove at slot 0/)
+    s.insert()
+    s.remove(0)
+    expect(() => s.remove(0)).toThrow('slot 0 already free')
   })
 })
 
 // ---------------------------------------------------------------------------
-// has()
+// has() — now takes slot number
 // ---------------------------------------------------------------------------
 
-describe('slab — has()', () => {
-  it('has(h) === true after insert()', () => {
+describe('slab — has(slot)', () => {
+  it('has(0) === true after insert()', () => {
     const s = slab(Vec3, 5)
-    const h = s.insert()
-    expect(s.has(h)).toBe(true)
+    s.insert()
+    expect(s.has(0)).toBe(true)
   })
 
-  it('has(h) === false after remove(h)', () => {
+  it('has(0) === false after remove(0)', () => {
     const s = slab(Vec3, 5)
-    const h = s.insert()
-    s.remove(h)
-    expect(s.has(h)).toBe(false)
+    s.insert()
+    s.remove(0)
+    expect(s.has(0)).toBe(false)
   })
 
-  it('has(slab.get(i)) checks arbitrary slot occupancy', () => {
+  it('has(i) checks arbitrary slot occupancy', () => {
     const s = slab(Vec3, 5)
     s.insert() // slot 0
     s.insert() // slot 1
     // Slot 0 is occupied
-    expect(s.has(s.get(0))).toBe(true)
+    expect(s.has(0)).toBe(true)
     // Slot 2 is not occupied
-    expect(s.has(s.get(2))).toBe(false)
+    expect(s.has(2)).toBe(false)
+  })
+
+  it('has(-1) throws out-of-range', () => {
+    const s = slab(Vec3, 5)
+    expect(() => s.has(-1)).toThrow('out of range')
+  })
+
+  it('has(capacity) throws out-of-range', () => {
+    const s = slab(Vec3, 5)
+    expect(() => s.has(5)).toThrow('out of range')
+  })
+
+  it('has(NaN) throws out-of-range', () => {
+    const s = slab(Vec3, 5)
+    expect(() => s.has(NaN)).toThrow('out of range')
+  })
+
+  it('has(0.5) throws out-of-range', () => {
+    const s = slab(Vec3, 5)
+    expect(() => s.has(0.5)).toThrow('out of range')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// remove() — now takes slot number
+// ---------------------------------------------------------------------------
+
+describe('slab — remove(slot) validation', () => {
+  it('remove(-1) throws out-of-range', () => {
+    const s = slab(Vec3, 5)
+    s.insert()
+    expect(() => s.remove(-1)).toThrow('out of range')
+  })
+
+  it('remove(capacity) throws out-of-range', () => {
+    const s = slab(Vec3, 5)
+    s.insert()
+    expect(() => s.remove(5)).toThrow('out of range')
+  })
+
+  it('remove(NaN) throws out-of-range', () => {
+    const s = slab(Vec3, 5)
+    s.insert()
+    expect(() => s.remove(NaN)).toThrow('out of range')
+  })
+
+  it('remove(0.5) throws out-of-range', () => {
+    const s = slab(Vec3, 5)
+    s.insert()
+    expect(() => s.remove(0.5)).toThrow('out of range')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// handle.slot public getter
+// ---------------------------------------------------------------------------
+
+describe('slab — handle.slot getter', () => {
+  it('handle.slot returns the slot the handle was last rebased to', () => {
+    const s = slab(Vec3, 5)
+    const h = s.insert()
+    expect((h as any).slot).toBe(0)
+    s.insert() // rebases handle to slot 1
+    expect((h as any).slot).toBe(1)
+  })
+
+  it('handle.slot updates after get(i) rebases it', () => {
+    const s = slab(Vec3, 5)
+    s.insert() // slot 0
+    s.insert() // slot 1
+    const h = s.get(0)
+    expect((h as any).slot).toBe(0)
+    s.get(1)
+    expect((h as any).slot).toBe(1)
+  })
+
+  it('handle.slot is a getter on the prototype, not an own property', () => {
+    const s = slab(Vec3, 5)
+    const h = s.insert()
+    const proto = Object.getPrototypeOf(h) as object
+    const protoDescriptor = Object.getOwnPropertyDescriptor(proto, 'slot')
+    // slot must be a getter on the prototype
+    expect(typeof protoDescriptor?.get).toBe('function')
+    // No setter emitted
+    expect(protoDescriptor?.set).toBeUndefined()
+  })
+
+  it('handle.slot is read-only — no setter', () => {
+    const s = slab(Vec3, 5)
+    const h = s.insert()
+    // Strict mode: assigning to a getter-only property should not throw, just silently fail
+    // (strict mode would throw — but we verify there is no setter via descriptor)
+    const proto = Object.getPrototypeOf(h) as object
+    const desc = Object.getOwnPropertyDescriptor(proto, 'slot')
+    expect(desc?.set).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Footgun-proof slot capture pattern (the whole point of task-5)
+// ---------------------------------------------------------------------------
+
+describe('slab — slot capture footgun proof', () => {
+  it('capturing slotA before second insert() removes the originally inserted slot', () => {
+    const s = slab(Vec3, 5)
+    // Capture the slot index IMMEDIATELY after insert()
+    const slotA = (s.insert() as any).slot as number   // slot 0
+    const slotB = (s.insert() as any).slot as number   // slot 1
+    // At this point (h as any).slot === 1 because handle was rebased by second insert()
+    // But slotA is still 0 — a primitive number, immune to rebasing
+    expect(slotA).toBe(0)
+    expect(slotB).toBe(1)
+    s.remove(slotA)
+    expect(s.has(0)).toBe(false) // slot 0 was freed
+    expect(s.has(1)).toBe(true)  // slot 1 still occupied
+    expect(s.len).toBe(1)
   })
 })
 

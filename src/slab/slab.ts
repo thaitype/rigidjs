@@ -32,12 +32,13 @@ export interface Slab<F extends StructFields> {
   insert(): Handle<F>
 
   /**
-   * Free the slot the given handle currently refers to.
+   * Free the slot at the given numeric index.
    *
-   * @throws "slab: double remove at slot N" on double-free.
+   * @throws "slot X out of range" if slot is out of [0, capacity).
+   * @throws "slot X already free" on double-free.
    * @throws "slab has been dropped" after drop().
    */
-  remove(handle: Handle<F>): void
+  remove(slot: number): void
 
   /**
    * Rebase the shared handle to slot `index`. Does NOT check occupancy.
@@ -49,11 +50,12 @@ export interface Slab<F extends StructFields> {
   get(index: number): Handle<F>
 
   /**
-   * Return true iff the slot the handle refers to is currently occupied.
+   * Return true iff the given numeric slot is currently occupied.
    *
+   * @throws "slot X out of range" if slot is out of [0, capacity).
    * @throws "slab has been dropped" after drop().
    */
-  has(handle: Handle<F>): boolean
+  has(slot: number): boolean
 
   /** Number of currently occupied slots. */
   readonly len: number
@@ -143,13 +145,13 @@ export function slab<F extends StructFields>(
       return _handle
     },
 
-    remove(handle: Handle<F>): void {
+    remove(slot: number): void {
       assertLive()
-      // `any` cast isolated here — _slot is an internal property of the generated handle.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const slot: number = (handle as any)._slot
+      if (!Number.isInteger(slot) || slot < 0 || slot >= capacity) {
+        throw new Error(`slot ${slot} out of range`)
+      }
       if (!bitmapGet(_bits, slot)) {
-        throw new Error('slab: double remove at slot ' + slot)
+        throw new Error(`slot ${slot} already free`)
       }
       bitmapClear(_bits, slot)
       _freeList.push(slot)
@@ -167,11 +169,12 @@ export function slab<F extends StructFields>(
       return _handle
     },
 
-    has(handle: Handle<F>): boolean {
+    has(slot: number): boolean {
       assertLive()
-      // `any` cast isolated here — reading internal _slot from the generated handle.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return bitmapGet(_bits, (handle as any)._slot)
+      if (!Number.isInteger(slot) || slot < 0 || slot >= capacity) {
+        throw new Error(`slot ${slot} out of range`)
+      }
+      return bitmapGet(_bits, slot)
     },
 
     get len(): number {

@@ -2,9 +2,12 @@ import { describe, it, expect } from 'bun:test'
 import { struct } from '../../src/struct/struct.js'
 
 // ---------------------------------------------------------------------------
-// Slot-stamped handle tests (milestone-2 task-1)
-// Verifies that generated handles carry _slot as an internal raw instance property.
-// Tests access _slot via (h as any)._slot — it is intentionally not a public getter.
+// Slot-stamped handle tests (milestone-2 task-1 / task-5 amendment)
+// Verifies:
+//   - _slot is an internal raw own-property (unchanged from task-1)
+//   - slot is a public read-only getter on the prototype (added by task-5)
+// Tests access _slot via (h as any)._slot — it is intentionally an internal property.
+// Tests access slot via (h as any).slot — it is the public contract getter.
 // ---------------------------------------------------------------------------
 
 const Vec3 = struct({ x: 'f64', y: 'f64', z: 'f64' })
@@ -124,5 +127,79 @@ describe('slot-stamped handle — _slot is NOT a getter', () => {
     // The value is accessible as an own property
     const ownDescriptor = Object.getOwnPropertyDescriptor(h, '_slot')
     expect(ownDescriptor?.value).toBe(42)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// slot getter (task-5 amendment) — public read-only getter on the prototype
+// ---------------------------------------------------------------------------
+
+describe('slot-stamped handle — slot public getter (task-5)', () => {
+  it('handle.slot returns the same value as the internal _slot', () => {
+    if (!Vec3._Handle) throw new Error('Vec3._Handle missing')
+
+    const buffer = new ArrayBuffer(Vec3.sizeof)
+    const view = new DataView(buffer)
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const h = new (Vec3._Handle as any)(view, 0, 5)
+
+    expect((h as any).slot).toBe(5)
+    expect((h as any).slot).toBe((h as any)._slot)
+  })
+
+  it('slot is a getter on the prototype (not an own property)', () => {
+    if (!Vec3._Handle) throw new Error('Vec3._Handle missing')
+
+    const buffer = new ArrayBuffer(Vec3.sizeof)
+    const view = new DataView(buffer)
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const h = new (Vec3._Handle as any)(view, 0, 3)
+
+    const proto = Object.getPrototypeOf(h) as object
+    const protoDesc = Object.getOwnPropertyDescriptor(proto, 'slot')
+
+    // Must exist as a getter on the prototype
+    expect(typeof protoDesc?.get).toBe('function')
+
+    // No setter — read-only
+    expect(protoDesc?.set).toBeUndefined()
+
+    // NOT an own property on the instance
+    const ownDesc = Object.getOwnPropertyDescriptor(h, 'slot')
+    expect(ownDesc).toBeUndefined()
+  })
+
+  it('slot getter updates when _rebase is called', () => {
+    if (!Vec3._Handle) throw new Error('Vec3._Handle missing')
+
+    const buffer = new ArrayBuffer(Vec3.sizeof * 3)
+    const view = new DataView(buffer)
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const h = new (Vec3._Handle as any)(view, 0, 0) as {
+      _rebase(view: DataView, offset: number, slot: number): unknown
+    }
+
+    expect((h as any).slot).toBe(0)
+    h._rebase(view, Vec3.sizeof, 2)
+    expect((h as any).slot).toBe(2)
+  })
+
+  it('sub-handle slot getter returns 0 (sub-handles are not user container entries)', () => {
+    if (!Particle._Handle) throw new Error('Particle._Handle missing')
+
+    const buffer = new ArrayBuffer(Particle.sizeof)
+    const view = new DataView(buffer)
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const h = new (Particle._Handle as any)(view, 0, 7) as { pos: object }
+
+    // Top-level slot is 7
+    expect((h as any).slot).toBe(7)
+
+    // Sub-handle slot is 0 (always, by construction)
+    expect((h.pos as any).slot).toBe(0)
   })
 })

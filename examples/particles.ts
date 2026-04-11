@@ -5,25 +5,28 @@
  * fixed-capacity slab. No Math.random() — all initial values are derived
  * from the particle index so output is deterministic and reproducible.
  *
- * # Handle-reuse invariant
- * insert() and get(i) both return the SAME shared handle object. This means:
+ * # Handle reuse + slot-capture invariant (task-5 amendment)
+ * insert() and get(i) both return the SAME shared handle object. This means
+ * holding onto a handle reference across multiple insert()/get() calls is
+ * a footgun — the handle moves to the most recently rebased slot.
  *
- *   const a = particles.insert()   // handle is now at slot 0
- *   const b = particles.insert()   // handle is now at slot 1  ← a and b are identical!
- *   particles.remove(a)            // removes slot 1, not slot 0!  ← WRONG
+ * The correct pattern for stable slot references is to capture the NUMERIC
+ * index immediately after insert():
  *
- * Correct idiom: always rebase the handle to a specific slot via get(i)
- * immediately before calling has() or remove(), so the handle points at the
- * intended slot and not wherever the last insert/get left it:
+ *   const slotA = particles.insert().slot   // slot 0 — a primitive number
+ *   const slotB = particles.insert().slot   // slot 1 — handle now at slot 1
+ *   // slotA is still 0; it is immune to handle rebasing
+ *   particles.remove(slotA)                 // removes slot 0 — correct
+ *
+ * remove(), has(), and get() all take the numeric slot directly:
  *
  *   for (let i = 0; i < particles.capacity; i++) {
- *     const h = particles.get(i)   // rebases the shared handle to slot i
- *     if (!particles.has(h)) continue
- *     if ((h as any).life < 0) particles.remove(h)  // removes slot i — correct
+ *     if (!particles.has(i)) continue
+ *     const h = particles.get(i)
+ *     h.pos.x += h.vel.x
  *   }
  *
- * Alternatively, store the slot index (not the handle reference) immediately
- * after insert() if you need to target a specific particle for removal later.
+ * This is allocation-free and stale-reference-proof.
  */
 
 import { struct, slab, type Slab } from '../src/index.js'
@@ -109,36 +112,31 @@ for (let i = 0; i < N; i++) {
 // ---------------------------------------------------------------------------
 // One fixed simulation tick: integrate pos by vel and decrement life by 1.0
 //
-// Correct iteration pattern: call get(i) once per slot to rebase the shared
-// handle, then use the same handle reference for has() and field access.
+// New idiom: has(i) takes the numeric slot directly.
+// get(i) rebases the shared handle to slot i and returns it.
 // ---------------------------------------------------------------------------
 
 const DT = 1.0
 
 for (let i = 0; i < particles.capacity; i++) {
-  // get(i) rebases the shared handle to slot i and returns it.
-  const h = particles.get(i)
-  if (!particles.has(h)) continue
-
-  const p = h as unknown as ParticleHandle
-  p.pos.x = p.pos.x + p.vel.x * DT
-  p.pos.y = p.pos.y + p.vel.y * DT
-  p.pos.z = p.pos.z + p.vel.z * DT
-  p.life = p.life - DT
+  if (!particles.has(i)) continue
+  const h = particles.get(i) as unknown as ParticleHandle
+  h.pos.x = h.pos.x + h.vel.x * DT
+  h.pos.y = h.pos.y + h.vel.y * DT
+  h.pos.z = h.pos.z + h.vel.z * DT
+  h.life = h.life - DT
 }
 
 // ---------------------------------------------------------------------------
 // Remove all particles whose life dropped below zero.
-// Call get(i) first — this rebases the shared handle to slot i so that
-// remove(h) targets exactly slot i (handle-reuse invariant).
+//
+// New idiom: remove(i) takes the numeric slot directly — no handle needed.
 // ---------------------------------------------------------------------------
 
 for (let i = 0; i < particles.capacity; i++) {
-  const h = particles.get(i)
-  if (!particles.has(h)) continue
-  if ((h as unknown as ParticleHandle).life < 0) {
-    particles.remove(h)
-  }
+  if (!particles.has(i)) continue
+  const h = particles.get(i) as unknown as ParticleHandle
+  if (h.life < 0) particles.remove(i)
 }
 
 // ---------------------------------------------------------------------------
@@ -149,9 +147,8 @@ let sumPosX = 0
 let aliveCount = 0
 
 for (let i = 0; i < particles.capacity; i++) {
-  const h = particles.get(i)
-  if (!particles.has(h)) continue
-  sumPosX += (h as unknown as ParticleHandle).pos.x
+  if (!particles.has(i)) continue
+  sumPosX += (particles.get(i) as unknown as ParticleHandle).pos.x
   aliveCount++
 }
 
