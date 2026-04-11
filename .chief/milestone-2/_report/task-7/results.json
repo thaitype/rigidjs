@@ -1,0 +1,109 @@
+{
+  "meta": {
+    "bunVersion": "1.3.8",
+    "platform": "darwin",
+    "arch": "arm64",
+    "date": "2026-04-11T16:41:02.881Z"
+  },
+  "results": [
+    {
+      "name": "B1 JS baseline (100k {x,y,z} alloc)",
+      "opsPerSec": 795,
+      "heapObjectsBefore": 7163,
+      "heapObjectsAfter": 7188,
+      "heapObjectsDelta": 25,
+      "heapSizeMB": 6.63,
+      "rssMB": 73.83,
+      "p50Us": 1287.13,
+      "p99Us": 2061.38
+    },
+    {
+      "name": "B1 RigidJS slab (100k inserts)",
+      "opsPerSec": 251,
+      "heapObjectsBefore": 7336,
+      "heapObjectsAfter": 7267,
+      "heapObjectsDelta": -69,
+      "heapSizeMB": 6.65,
+      "rssMB": 100.8,
+      "p50Us": 3723.88,
+      "p99Us": 8071.58
+    },
+    {
+      "name": "B2 JS baseline (10k insert+remove/frame)",
+      "opsPerSec": 7302,
+      "heapObjectsBefore": 7274,
+      "heapObjectsAfter": 7294,
+      "heapObjectsDelta": 20,
+      "heapSizeMB": 6.83,
+      "rssMB": 100.92,
+      "p50Us": 143.71,
+      "p99Us": 732.5
+    },
+    {
+      "name": "B2 RigidJS slab (10k insert+remove/frame)",
+      "opsPerSec": 3098,
+      "heapObjectsBefore": 7310,
+      "heapObjectsAfter": 7330,
+      "heapObjectsDelta": 20,
+      "heapSizeMB": 6.86,
+      "rssMB": 101.61,
+      "p50Us": 287.42,
+      "p99Us": 735.17
+    },
+    {
+      "name": "B3 JS baseline (100k pos.x += vel.x)",
+      "opsPerSec": 3040,
+      "heapObjectsBefore": 307322,
+      "heapObjectsAfter": 307345,
+      "heapObjectsDelta": 23,
+      "heapSizeMB": 19.86,
+      "rssMB": 102.59,
+      "p50Us": 253.29,
+      "p99Us": 927.63
+    },
+    {
+      "name": "B3 RigidJS slab (100k h.pos.x += h.vel.x)",
+      "opsPerSec": 552,
+      "heapObjectsBefore": 307361,
+      "heapObjectsAfter": 307382,
+      "heapObjectsDelta": 21,
+      "heapSizeMB": 19.9,
+      "rssMB": 102.97,
+      "p50Us": 1748.75,
+      "p99Us": 2615.79
+    },
+    {
+      "name": "B7 JS nested (50k {pos:{x,y,z},vel:{x,y,z},life,id})",
+      "opsPerSec": 856,
+      "heapObjectsBefore": 307390,
+      "heapObjectsAfter": 307399,
+      "heapObjectsDelta": 9,
+      "heapSizeMB": 19.91,
+      "rssMB": 129.48,
+      "p50Us": 1132,
+      "p99Us": 2034.75
+    },
+    {
+      "name": "B7 JS flat (50k {posX,posY,posZ,...,life,id})",
+      "opsPerSec": 1129,
+      "heapObjectsBefore": 307401,
+      "heapObjectsAfter": 307413,
+      "heapObjectsDelta": 12,
+      "heapSizeMB": 19.92,
+      "rssMB": 129.69,
+      "p50Us": 725.67,
+      "p99Us": 1849.83
+    },
+    {
+      "name": "B7 RigidJS nested struct (50k Particle slab)",
+      "opsPerSec": 235,
+      "heapObjectsBefore": 307603,
+      "heapObjectsAfter": 307653,
+      "heapObjectsDelta": 50,
+      "heapSizeMB": 23.13,
+      "rssMB": 147.89,
+      "p50Us": 4547.96,
+      "p99Us": 5207.92
+    }
+  ]
+}
