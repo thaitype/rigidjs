@@ -7,9 +7,10 @@
  *   bun run bench              — run all scenarios
  *   bun run bench -s B1-slab   — run a single scenario by name
  *
- * Each scenario group runs in its own OS process via Bun.spawn() so there is
- * no JIT contamination between groups. All spawns are sequential — no parallel
- * processes compete for CPU or memory.
+ * Each scenario group runs two sequential OS processes — one for the JS
+ * baseline variant and one for the RigidJS variant — so JIT optimizations
+ * from the baseline cannot leak into the RigidJS measurement.
+ * All spawns are sequential — no parallel processes compete for CPU or memory.
  */
 
 import { mkdir } from 'node:fs/promises'
@@ -104,6 +105,7 @@ async function spawnScenario(opts: {
   export?: string
   type: 'oneshot' | 'sustained' | 'scaling'
   name: string
+  variant?: 'js' | 'rigid'
 }): Promise<unknown> {
   const args = [
     '--smol',
@@ -112,8 +114,10 @@ async function spawnScenario(opts: {
     '--type', opts.type,
   ]
   if (opts.export) args.push('--export', opts.export)
+  if (opts.variant) args.push('--variant', opts.variant)
 
-  console.log(`  Running: ${opts.name}`)
+  const variantLabel = opts.variant ? ` [${opts.variant}]` : ''
+  console.log(`  Running: ${opts.name}${variantLabel}`)
 
   const proc = Bun.spawn(['bun', ...args], {
     env: { ...process.env },
@@ -197,15 +201,31 @@ const scalingB9: { jsResults: SustainedResult[]; rigidResults: SustainedResult[]
 
 for (const scenario of selectedScenarios) {
   if (scenario.kind === 'oneshot') {
-    const raw = await spawnScenario({ file: scenario.file, export: scenario.export, type: 'oneshot', name: scenario.name })
-    oneshotResults.push(...asOneshot(raw, scenario.name).results)
+    // JS baseline subprocess — runs only scenarios without "RigidJS" in the name
+    const rawJs = await spawnScenario({ file: scenario.file, export: scenario.export, type: 'oneshot', name: scenario.name, variant: 'js' })
+    oneshotResults.push(...asOneshot(rawJs, scenario.name).results)
+
+    // RigidJS subprocess — runs only scenarios with "RigidJS" in the name
+    const rawRigid = await spawnScenario({ file: scenario.file, export: scenario.export, type: 'oneshot', name: scenario.name, variant: 'rigid' })
+    oneshotResults.push(...asOneshot(rawRigid, scenario.name).results)
+
   } else if (scenario.kind === 'sustained') {
-    const raw = await spawnScenario({ file: scenario.file, export: scenario.export, type: 'sustained', name: scenario.name })
-    sustainedResults.push(...asSustained(raw, scenario.name).results)
+    // JS baseline subprocess
+    const rawJs = await spawnScenario({ file: scenario.file, export: scenario.export, type: 'sustained', name: scenario.name, variant: 'js' })
+    sustainedResults.push(...asSustained(rawJs, scenario.name).results)
+
+    // RigidJS subprocess
+    const rawRigid = await spawnScenario({ file: scenario.file, export: scenario.export, type: 'sustained', name: scenario.name, variant: 'rigid' })
+    sustainedResults.push(...asSustained(rawRigid, scenario.name).results)
+
   } else {
-    const raw = await spawnScenario({ file: scenario.file, type: 'scaling', name: scenario.name })
-    const { b9JsResults, b9RigidResults } = asScaling(raw, scenario.name)
+    // scaling: JS baseline subprocess then RigidJS subprocess
+    const rawJs = await spawnScenario({ file: scenario.file, type: 'scaling', name: scenario.name, variant: 'js' })
+    const { b9JsResults } = asScaling(rawJs, scenario.name)
     scalingB9.jsResults.push(...b9JsResults)
+
+    const rawRigid = await spawnScenario({ file: scenario.file, type: 'scaling', name: scenario.name, variant: 'rigid' })
+    const { b9RigidResults } = asScaling(rawRigid, scenario.name)
     scalingB9.rigidResults.push(...b9RigidResults)
   }
 }
