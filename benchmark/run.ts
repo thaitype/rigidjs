@@ -61,12 +61,22 @@ import { b3ColumnScenarios } from './scenarios/b3-column.js'
 import { b7Scenarios } from './scenarios/b7-nested-struct.js'
 import { b8Scenarios } from './scenarios/b8-sustained-churn.js'
 import { b9JsBaselineFactory, b9RigidJsFactory, CAPACITIES, XL_CAPACITY } from './scenarios/b9-heap-scaling.js'
+// milestone-4 vec scenarios
+import { b1VecScenarios } from './scenarios/b1-vec-creation.js'
+import { b2VecScenarios } from './scenarios/b2-vec-churn.js'
+import { b3VecHandleScenarios } from './scenarios/b3-vec-handle.js'
+import { b3VecColumnScenarios } from './scenarios/b3-vec-column.js'
+import { b3PartialScenarios } from './scenarios/b3-partial.js'
 
 // ---------------------------------------------------------------------------
-// Run all scenarios B1 → B2 → B3 → B3-column → B7
+// Run all scenarios B1 → B2 → B3 → B3-column → B7 → vec scenarios
 // ---------------------------------------------------------------------------
 
-const allScenarios = [...b1Scenarios, ...b2Scenarios, ...b3Scenarios, ...b3ColumnScenarios, ...b7Scenarios]
+const allScenarios = [
+  ...b1Scenarios, ...b2Scenarios, ...b3Scenarios, ...b3ColumnScenarios, ...b7Scenarios,
+  // milestone-4 vec scenarios
+  ...b1VecScenarios, ...b2VecScenarios, ...b3VecHandleScenarios, ...b3VecColumnScenarios, ...b3PartialScenarios,
+]
 
 console.log('Running benchmarks...\n')
 const results: BenchResult[] = await runAll(allScenarios)
@@ -972,5 +982,70 @@ if (!(await Bun.file(task4ResultsPath).exists())) {
 } else {
   console.log(`Skipping ${task4ResultsPath} (already exists — task-4 historical artifact)\n`)
 }
+
+// ---------------------------------------------------------------------------
+// Milestone-4 task-5 report — full suite including all vec scenarios
+// ---------------------------------------------------------------------------
+// This block writes the task-5 results.json to .chief/milestone-4/_report/task-5/.
+// It is NOT guarded — each bench run overwrites it so the report stays current.
+// ---------------------------------------------------------------------------
+
+const m4Task5ReportDir = '.chief/milestone-4/_report/task-5'
+await mkdir(m4Task5ReportDir, { recursive: true })
+
+const m4Task5Meta = {
+  bunVersion: Bun.version,
+  platform: process.platform,
+  arch: process.arch,
+  date: new Date().toISOString(),
+  milestone: 'milestone-4',
+  task: 'task-5',
+  jitCountersAvailable,
+  rawTimeseriesPath: './raw-timeseries.json',
+  baselineReference: '.chief/milestone-3/_report/task-4/results.json',
+}
+
+// Separate scenario groups from the combined results array
+const m4SlabOneShot = results.filter((r) =>
+  r.name.startsWith('B1 ') ||
+  r.name.startsWith('B2 ') ||
+  r.name.startsWith('B3 ') ||
+  r.name.startsWith('B7 ')
+)
+const m4B3Column = results.filter((r) => r.name.startsWith('B3-column RigidJS slab'))
+const m4VecOneShot = results.filter((r) =>
+  r.name.startsWith('B1-vec') ||
+  r.name.startsWith('B2-vec') ||
+  r.name.startsWith('B3-vec') ||
+  r.name.startsWith('B3-partial')
+)
+
+const { scalars: m4B8Scalars, timeSeries: m4B8TimeSeries } = splitSustainedResults(b8Results)
+const { scalars: m4B9Scalars, timeSeries: m4B9TimeSeries } = splitSustainedResults(b9Results)
+
+const m4Task5Payload = {
+  meta: m4Task5Meta,
+  // Slab one-shot (B1, B2, B3, B7) — same as milestone-3 for regression comparison
+  slabOneShot: m4SlabOneShot,
+  // B3-column slab — milestone-3 carried forward
+  b3ColumnSlab: m4B3Column,
+  // Vec one-shot (B1-vec, B2-vec, B3-vec-handle, B3-vec-column, B3-partial) — new in milestone-4
+  vecOneShot: m4VecOneShot,
+  // Sustained (B8/B9) — slab only, for regression gate
+  sustained: {
+    b8: m4B8Scalars,
+    b9: m4B9Scalars,
+  },
+}
+
+const m4Task5TimeseriesPayload = {
+  meta: { date: m4Task5Meta.date, description: 'heapTimeSeries arrays stripped from results.json' },
+  b8: m4B8TimeSeries,
+  b9: m4B9TimeSeries,
+}
+
+await writeReportSplit(m4Task5ReportDir, m4Task5Payload, m4Task5TimeseriesPayload)
+console.log(`\nMilestone-4 task-5 results written to ${m4Task5ReportDir}/results.json`)
+console.log(`(raw-timeseries.json written alongside — gitignored)\n`)
 
 process.exit(0)
