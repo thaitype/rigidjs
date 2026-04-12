@@ -4,7 +4,7 @@
 **Platform:** darwin / arm64
 **Date:** 2026-04-12T01:35:42.035Z
 **XL enabled:** false
-**JIT counters available:** none (all null on Bun 1.3.8)
+**JIT counters available:** none (all null in this run — see the "⚠️ CORRECTION" block in §JIT compile deltas; the null values are due to a harness measurement bug, not a Bun limitation)
 
 ---
 
@@ -106,7 +106,35 @@ For one-shot scenarios (B1, B7), the CPU bracket includes JIT warmup time. Rigid
 | b9-js-cap1000000 | - | - | - |
 | b9-rigid-cap1000000 | - | - | - |
 
-On Bun 1.3.8 (darwin/arm64), the `bun:jsc` module exposes `numberOfDFGCompiles` as a function but it returns `undefined` rather than a numeric count. No sibling counter (`numberOfFTLCompiles`, `numberOfOSRExits`) is exposed as a function at all. All JIT delta fields are therefore `null` for this run. This is a Bun version limitation — a future Bun version that returns a numeric counter from these functions will produce non-null deltas automatically (the harness probes and wires them at module load).
+> ### ⚠️ CORRECTION — measurement error, not a Bun limitation
+>
+> The rest of this section described the JIT counters as "unavailable on Bun 1.3.8". **That conclusion is wrong.** It came from a bug in `benchmark/probe-jsc.ts` and `benchmark/harness.ts`, not from a real runtime limitation.
+>
+> **Root cause.** `numberOfDFGCompiles` takes a **function argument** — its real signature is `numberOfDFGCompiles(fn: Function): number`, not `numberOfDFGCompiles(): number`. It asks JSC "how many times has this specific function been DFG-compiled?". The probe called it with zero arguments, which returns `undefined`, which the harness's `_probeCounter` helper interpreted as "counter unavailable", nulling out every JIT delta in the entire report.
+>
+> **Verified correct usage:**
+>
+> ```ts
+> import { numberOfDFGCompiles } from 'bun:jsc'
+>
+> const hot = (x: number) => x * x + x
+> for (let i = 0; i < 1_000_000; i++) hot(i)   // warm into DFG tier
+> console.log(numberOfDFGCompiles(hot))         // → 1 (a real number)
+> ```
+>
+> On Bun 1.3.8 darwin/arm64 this prints `1`. The counter works fine; we just need to (a) pass the hot function as an argument, and (b) make sure the function has been warmed past the DFG compilation threshold before sampling.
+>
+> **Correct measurement strategy for this harness.** Pass `scenario.fn` / `scenario.tick` as the function argument to `numberOfDFGCompiles(fn)`. Sample it before warmup and after the measurement window; report the delta. This measures how many times JSC recompiled that specific wrapper closure during the run — a direct signal of hidden-class thrash at the wrapper level. Note: it does NOT measure recompiles of nested functions called inside the wrapper, which JSC tracks separately.
+>
+> **Other counters that take a function argument (same bug applies):** `reoptimizationRetryCount`, `optimizeNextInvocation`, `noFTL`, `noInline`. All were probed with zero arguments in task-10 and therefore misclassified as "unavailable".
+>
+> **Counters that are legitimately process-global (zero-arg):** `totalCompileTime`, `heapSize`, `heapStats`, `memoryUsage`, `percentAvailableMemoryInUse`. These worked correctly in task-10.
+>
+> **`totalCompileTime` is a usable signal we missed.** It is process-global (`() => number`, returns ms of compile time since process start) and was reported as "0 at startup" by the probe, but it was never sampled as a delta across the measurement window. A future fix should capture `totalCompileTime()` before warmup and after the measurement window; the delta is "ms JSC spent compiling during this run" — a useful secondary signal for hidden-class thrash (JS baselines with shape instability should burn more compile time than stable RigidJS generated classes).
+>
+> **Impact on the numbers below.** Every value in the `dfgΔ` / `ftlΔ` / `osrExitsΔ` columns is `-` (null) because the harness never successfully sampled any JIT counter. The column values are not meaningful evidence for any conclusion in this report. Do not cite them.
+>
+> **Why we didn't fix it in task-10.** The measurement bug was discovered after task-10 shipped, via a direct one-line repro outside the harness. Fixing it requires (a) rewriting `benchmark/probe-jsc.ts` to probe function-argument counters separately with a warmed throwaway function, (b) rewiring `benchmark/harness.ts` to call the counter as `numberOfDFGCompiles(scenario.fn)` instead of `numberOfDFGCompiles()`, and (c) re-running `bun run bench` to regenerate this report. That fix is deferred to a future task (tentatively task-11). The rest of the task-10 evidence — CPU totals, high-water RSS, heap time-series sparklines, per-tick latency — is unaffected by this bug and remains valid.
 
 ---
 
@@ -166,7 +194,7 @@ The liveObjects series shows variation across the window.
 
 ## Verdict
 
-**Thesis supported by new instrumentation.** The task-9 finding that RigidJS wins on tail latency at 100k capacity is corroborated by the task-10 signals. RigidJS p99 is 0.1976 ms versus JS 0.2922 ms; p999 is 0.2297 ms versus JS 0.7452 ms. The CPU comparison (B8) shows RigidJS uses less total CPU time than JS for the same window, suggesting the GC-work reduction outweighs DataView dispatch in aggregate CPU accounting. The high-water RSS signal does not strongly favor either variant at this scale. Both peak at similar RSS values, which suggests the OS-level memory pressure from JS allocations is already reclaimed quickly enough not to cause sustained high-water divergence. JIT counter data is unavailable on Bun 1.3.8 — all delta fields are null. This is a Bun version limitation and cannot be interpreted as either supporting or contradicting the thesis.
+**Thesis supported by new instrumentation (with one caveat).** The task-9 finding that RigidJS wins on tail latency at 100k capacity is corroborated by the task-10 signals. RigidJS p99 is 0.1976 ms versus JS 0.2922 ms; p999 is 0.2297 ms versus JS 0.7452 ms. The CPU comparison (B8) shows RigidJS uses less total CPU time than JS for the same window, suggesting the GC-work reduction outweighs DataView dispatch in aggregate CPU accounting. The high-water RSS signal does not strongly favor either variant at this scale. Both peak at similar RSS values, which suggests the OS-level memory pressure from JS allocations is already reclaimed quickly enough not to cause sustained high-water divergence. **JIT counter data is `null` across every scenario in this report — see the correction block in §JIT compile deltas. The null values are a harness measurement bug, not a Bun limitation. The JIT signal is currently missing from this report and must be regenerated after the harness fix lands.**
 
 ---
 
@@ -174,7 +202,7 @@ The liveObjects series shows variation across the window.
 
 - Single-run numbers. GC timing, JIT compilation state, and OS scheduling all vary between runs. These are reference data points, not statistically significant regression gates.
 - Machine-dependent: measured on Bun 1.3.8 / darwin / arm64. Results on different hardware or Bun versions may differ materially.
-- **JIT counters unavailable on Bun 1.3.8:** `numberOfDFGCompiles` is present in `Object.keys(bun:jsc)` but returns `undefined` rather than a numeric count on this version. No sibling counters (FTL, OSR) are exposed. All `dfgCompilesDelta`, `ftlCompilesDelta`, `osrExitsDelta` fields are `null` in this run's data.
+- **JIT counters are null due to a measurement bug, NOT a Bun limitation.** See the ⚠️ CORRECTION block in §JIT compile deltas for the full explanation. Short version: `numberOfDFGCompiles` takes a function argument (`numberOfDFGCompiles(fn)`), but the probe and harness both called it with zero arguments. On Bun 1.3.8 darwin/arm64 the counter actually works — verified via `numberOfDFGCompiles(hot)` returning a real number after warming `hot()`. Fix deferred to a future task. Ignore the `dfgΔ` / `ftlΔ` / `osrExitsΔ` columns as evidence.
 - **RSS polling overhead (one-shot bench()):** Strided polling with `sampleMask` adds ~16 `process.memoryUsage()` syscalls per scenario across the entire timing loop. B1 JS ops/sec: 773 (task-8 baseline: 889, delta: -13.0%). B1 RigidJS ops/sec: 226 (task-8 baseline: 326, delta: -30.7%). Deltas exceed the 5% budget. Single-run benchmark variance on macOS (JIT warmup, OS scheduling, process memory state) routinely produces >5% swings between runs — this is not instrumentation overhead but run-to-run noise. The actual cost of ~16 syscalls across a 10k-iteration loop is negligible (<0.1% on any modern CPU).
 - **B8 tick count vs task-9 baseline:** B8 JS ticks: 20,040 (task-9: 51,892, delta: -61.4%). B8 RigidJS ticks: 42,959 (task-9: 54,613, delta: -21.3%). One or both deltas exceed the 10% budget — this may indicate elevated instrumentation cost or run-to-run variance.
 - Per-tick RSS sampling in `benchSustained()` adds one `process.memoryUsage()` syscall per tick. At B8's tick rate this adds ~1 µs of overhead per tick, which is ≤1% of per-tick cost.

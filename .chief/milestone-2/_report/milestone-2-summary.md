@@ -93,6 +93,47 @@ The `.iter()`, `vec()`, and `bump()` primitives from future milestones should cl
 - Do the numbers hold on non-Apple-Silicon hardware, under memory pressure, inside a long-running server?
 - At what capacity does RigidJS start beating JS on **mean** throughput (not just tail)? Current data suggests somewhere >1M entities; B9 should be re-run at 10M to find out.
 
+## Known measurement issues (deferred fixes)
+
+### Task-10 JIT counter data is invalid — `numberOfDFGCompiles` was called wrong
+
+Every `dfgΔ` / `ftlΔ` / `osrExitsΔ` column in `.chief/milestone-2/_report/task-10/benchmark.md` is `null`. Task-10 attributed this to a "Bun 1.3.8 limitation". **That attribution is wrong** — it is a harness measurement bug in `benchmark/probe-jsc.ts` and `benchmark/harness.ts`.
+
+**Root cause.** `numberOfDFGCompiles` is a **per-function** counter with signature `numberOfDFGCompiles(fn: Function): number` — you pass it a specific function and it returns how many times JSC has DFG-compiled that function. Our probe and harness both called it with **zero arguments**, which returns `undefined`, which the `_probeCounter` helper interpreted as "counter unavailable".
+
+**Repro proving the counter works on Bun 1.3.8:**
+
+```ts
+import { numberOfDFGCompiles } from 'bun:jsc'
+
+const hot = (x: number) => x * x + x
+for (let i = 0; i < 1_000_000; i++) hot(i)   // warm past DFG threshold
+console.log(numberOfDFGCompiles(hot))         // → 1 (real number, not undefined)
+```
+
+**Other counters hit by the same bug.** Anything with a function-argument signature: `reoptimizationRetryCount`, `optimizeNextInvocation`, `noFTL`, `noInline`. All were misclassified as "unavailable" in task-10.
+
+**Correct measurement strategy for the harness fix:**
+1. Keep `scenario.fn` / `scenario.tick` as a top-level named `const` (already the case).
+2. Before warmup, call `dfgBefore = numberOfDFGCompiles(scenario.fn)`.
+3. Run warmup + measurement window as normal.
+4. After the window, call `dfgAfter = numberOfDFGCompiles(scenario.fn)`.
+5. Report `dfgCompilesDelta = dfgAfter - dfgBefore`.
+
+This measures recompiles of the wrapper closure — a direct signal of "did the hot loop stay JIT-stable or did it thrash". **Blind spot:** it does NOT capture recompiles of nested functions called inside the wrapper (JSC tracks those separately per function). That blind spot should be documented when the fix lands; it does not block the correction.
+
+**Also missed in task-10: `totalCompileTime()` delta.** This is a legitimately process-global counter (zero-arg, returns total ms JSC spent compiling since process start). The probe reported it as `0` at startup but the harness never sampled it as a delta across the measurement window. A full fix should capture `totalCompileTime()` before and after each run and report the delta alongside `dfgΔ`.
+
+**Where the fix lives (when we get to it):**
+1. Rewrite `benchmark/probe-jsc.ts` with a two-phase probe: phase A for zero-arg counters (existing), phase B for function-argument counters that passes a throwaway warmed function.
+2. Rewire `benchmark/harness.ts` JIT counter sampling to pass `scenario.fn` / `scenario.tick` as the argument.
+3. Add `totalCompileTime` delta sampling as a separate process-global signal.
+4. Re-run `bun run bench` and overwrite `.chief/milestone-2/_report/task-10/{results.json, benchmark.md, bun-jsc-probe.txt}` with the corrected numbers. Task-7 and task-9 reports stay untouched.
+
+**What's still valid in task-10 despite this bug.** CPU totals, high-water RSS, heap time-series sparklines, and per-tick latency percentiles are all unaffected by the JIT counter bug and remain trustworthy evidence.
+
+**Status.** Deferred — not blocking milestone-2 completion. Will be addressed in a follow-up task (tentatively task-11) before milestone-3 starts, OR in parallel with milestone-3 work as bandwidth allows.
+
 ## Deliverables landed
 
 - `src/slab/slab.ts`, `src/slab/bitmap.ts`, extended `src/struct/handle-codegen.ts`, `src/types.ts`
