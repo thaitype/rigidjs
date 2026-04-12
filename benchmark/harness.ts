@@ -1,5 +1,41 @@
 import { heapStats } from 'bun:jsc'
 
+// Cast jsc through Record<string,unknown> once to satisfy verbatimModuleSyntax + strict mode
+// without `any` — the dynamic property access below requires this escape hatch.
+import * as jsc from 'bun:jsc'
+const _jscMap = jsc as Record<string, unknown>
+
+// ---------------------------------------------------------------------------
+// JIT counter probes — resolved at module load. Any counter absent on this
+// Bun version is null.  Probe step (task-10 §3) showed that numberOfDFGCompiles
+// exists in Object.keys(jsc) on Bun 1.3.8 but returns undefined, not a number.
+// We guard for typeof === 'function' AND a numeric return value before keeping.
+// ---------------------------------------------------------------------------
+
+function _probeCounter(name: string): (() => number) | null {
+  const fn = _jscMap[name]
+  if (typeof fn !== 'function') return null
+  // Call once to check if it returns a finite number on this Bun version
+  try {
+    const sample = (fn as () => unknown)()
+    if (typeof sample === 'number' && isFinite(sample)) return fn as () => number
+  } catch {
+    // throws on this version — treat as unavailable
+  }
+  return null
+}
+
+const dfgCompilesFn: (() => number) | null = _probeCounter('numberOfDFGCompiles')
+const ftlCompilesFn: (() => number) | null = _probeCounter('numberOfFTLCompiles')
+const osrExitsFn: (() => number) | null = _probeCounter('numberOfOSRExits')
+
+// List of JIT counter names that are actually available on this Bun version
+export const jitCountersAvailable: string[] = [
+  dfgCompilesFn !== null ? 'numberOfDFGCompiles' : null,
+  ftlCompilesFn !== null ? 'numberOfFTLCompiles' : null,
+  osrExitsFn !== null ? 'numberOfOSRExits' : null,
+].filter((s): s is string => s !== null)
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -36,6 +72,14 @@ export interface BenchResult {
   rssMB: number
   p50Us: number
   p99Us: number
+  // --- task-10 additions (appended only) ---
+  cpuUserUs: number
+  cpuSystemUs: number
+  cpuTotalUs: number
+  dfgCompilesDelta: number | null
+  ftlCompilesDelta: number | null       // null when counter not present on this Bun version
+  osrExitsDelta: number | null          // null when counter not present on this Bun version
+  highWaterRssMB: number
 }
 
 export interface Scenario {
@@ -114,6 +158,14 @@ export async function bench(scenario: Scenario): Promise<BenchResult> {
   await Bun.sleep(100)
 
   // 4. Warmup — let JSC JIT compile without timing
+  // --- task-10: CPU / JIT bracket begins immediately BEFORE warmup ---
+  const cpuStart = process.cpuUsage()
+  const jitStart = {
+    dfg: dfgCompilesFn !== null ? dfgCompilesFn() : null,
+    ftl: ftlCompilesFn !== null ? ftlCompilesFn() : null,
+    osrExits: osrExitsFn !== null ? osrExitsFn() : null,
+  }
+
   for (let i = 0; i < warmup; i++) scenario.fn()
 
   // 5. Force GC before measurement window
@@ -127,12 +179,24 @@ export async function bench(scenario: Scenario): Promise<BenchResult> {
   //    (Internal cast: Float64Array stores numbers; no typed user-facing API here.)
   const latencies = new Float64Array(iterations)
 
+  // --- task-10: RSS high-water tracking — strategy: strided polling with ~16 probes
+  // Compute a power-of-two mask that fires approximately 16 times across the window.
+  // This adds at most 16 syscalls total, well within the 5% overhead budget.
+  const sampleMask =
+    (1 << Math.max(0, Math.ceil(Math.log2(Math.max(1, iterations / 16))))) - 1
+  let highWaterRssBytes = process.memoryUsage().rss  // initial sample
+
   // 8. Timed loop — outer bookends are the source of truth for opsPerSec
   const loopStart = Bun.nanoseconds()
   for (let i = 0; i < iterations; i++) {
     const t0 = Bun.nanoseconds()
     scenario.fn()
     latencies[i] = Bun.nanoseconds() - t0
+    // Strided RSS probe — cheap: ~16 syscalls total across entire loop
+    if ((i & sampleMask) === 0) {
+      const rss = process.memoryUsage().rss
+      if (rss > highWaterRssBytes) highWaterRssBytes = rss
+    }
   }
   const elapsed = Bun.nanoseconds() - loopStart
 
@@ -143,6 +207,18 @@ export async function bench(scenario: Scenario): Promise<BenchResult> {
   // 10. Snapshot heap after
   const heapAfter = heapStats()
 
+  // --- task-10: read CPU / JIT end deltas (bracket ends AFTER post-loop GC)
+  const cpuEnd = process.cpuUsage(cpuStart)
+  const jitEnd = {
+    dfg: dfgCompilesFn !== null ? dfgCompilesFn() : null,
+    ftl: ftlCompilesFn !== null ? ftlCompilesFn() : null,
+    osrExits: osrExitsFn !== null ? osrExitsFn() : null,
+  }
+
+  // Final RSS sample for high-water max
+  const endRss = process.memoryUsage().rss
+  if (endRss > highWaterRssBytes) highWaterRssBytes = endRss
+
   // 11. Optional teardown
   scenario.teardown?.()
 
@@ -151,7 +227,28 @@ export async function bench(scenario: Scenario): Promise<BenchResult> {
   const p50Us = +(latencies[Math.floor(iterations * 0.50)]! / 1000).toFixed(2)
   const p99Us = +(latencies[Math.floor(iterations * 0.99)]! / 1000).toFixed(2)
 
-  // 13. Build and return result
+  // 13. Compute task-10 fields
+  const cpuUserUs = cpuEnd.user
+  const cpuSystemUs = cpuEnd.system
+  const cpuTotalUs = cpuEnd.user + cpuEnd.system
+
+  const dfgCompilesDelta =
+    jitEnd.dfg !== null && jitStart.dfg !== null ? jitEnd.dfg - jitStart.dfg : null
+  const ftlCompilesDelta =
+    jitEnd.ftl !== null && jitStart.ftl !== null ? jitEnd.ftl - jitStart.ftl : null
+  const osrExitsDelta =
+    jitEnd.osrExits !== null && jitStart.osrExits !== null
+      ? jitEnd.osrExits - jitStart.osrExits
+      : null
+
+  // Final RSS sample — taken at result-build time to match rssMB. Update high-water
+  // once more so highWaterRssMB >= rssMB is always true (teardown may move RSS slightly).
+  const finalRss = process.memoryUsage().rss
+  if (finalRss > highWaterRssBytes) highWaterRssBytes = finalRss
+
+  const highWaterRssMB = +(highWaterRssBytes / (1024 * 1024)).toFixed(2)
+
+  // 14. Build and return result
   return {
     name: scenario.name,
     opsPerSec: Math.round((iterations / elapsed) * 1e9),
@@ -161,9 +258,16 @@ export async function bench(scenario: Scenario): Promise<BenchResult> {
     allocationDelta,
     retainedAfterGC,
     heapSizeMB: +(heapAfter.heapSize / 1024 / 1024).toFixed(2),
-    rssMB: +(process.memoryUsage().rss / 1024 / 1024).toFixed(2),
+    rssMB: +(finalRss / (1024 * 1024)).toFixed(2),
     p50Us,
     p99Us,
+    cpuUserUs,
+    cpuSystemUs,
+    cpuTotalUs,
+    dfgCompilesDelta,
+    ftlCompilesDelta,
+    osrExitsDelta,
+    highWaterRssMB,
   }
 }
 
@@ -184,6 +288,7 @@ export async function runAll(scenarios: Scenario[]): Promise<BenchResult[]> {
 
 // ---------------------------------------------------------------------------
 // formatTable — fixed-width plain-text summary table
+// Strategy: widen-the-table (add cpuMs, dfgΔ, hwRssMB columns without removing any)
 // ---------------------------------------------------------------------------
 
 export function formatTable(results: BenchResult[]): string {
@@ -196,6 +301,9 @@ export function formatTable(results: BenchResult[]): string {
   const COL_RSS = 9
   const COL_P50 = 9
   const COL_P99 = 9
+  const COL_CPU_MS = 10
+  const COL_DFG = 7
+  const COL_HW_RSS = 10
 
   function pad(s: string, n: number, right = false): string {
     return right ? s.padStart(n) : s.padEnd(n)
@@ -215,6 +323,9 @@ export function formatTable(results: BenchResult[]): string {
     pad('rssMB', COL_RSS, true),
     pad('p50µs', COL_P50, true),
     pad('p99µs', COL_P99, true),
+    pad('cpuMs', COL_CPU_MS, true),
+    pad('dfgΔ', COL_DFG, true),
+    pad('hwRssMB', COL_HW_RSS, true),
   ].join('  ')
 
   const sep = '-'.repeat(header.length)
@@ -230,6 +341,9 @@ export function formatTable(results: BenchResult[]): string {
       pad(r.rssMB.toFixed(2), COL_RSS, true),
       pad(r.p50Us.toFixed(2), COL_P50, true),
       pad(r.p99Us.toFixed(2), COL_P99, true),
+      pad((r.cpuTotalUs / 1000).toFixed(1), COL_CPU_MS, true),
+      pad(fmtNullable(r.dfgCompilesDelta), COL_DFG, true),
+      pad(r.highWaterRssMB.toFixed(2), COL_HW_RSS, true),
     ].join('  '),
   )
 
@@ -239,6 +353,12 @@ export function formatTable(results: BenchResult[]): string {
 // ---------------------------------------------------------------------------
 // Sustained-load types
 // ---------------------------------------------------------------------------
+
+export interface HeapSample {
+  tick: number           // tick index at the moment of sampling
+  liveObjects: number    // liveObjectCount(heapStats())
+  rssMB: number          // process.memoryUsage().rss / (1024*1024), 2 decimals
+}
 
 export interface SustainedScenario {
   name: string
@@ -255,6 +375,11 @@ export interface SustainedScenario {
    * and records allocationDelta. If absent, allocationDelta is null.
    */
   allocate?: () => unknown
+  /**
+   * task-10: opt-in per-tick heap time-series collection. Default false.
+   * Only meaningful for long-window scenarios (B8). B9 leaves this unset (null).
+   */
+  collectHeapTimeSeries?: boolean
 }
 
 export interface SustainedResult {
@@ -272,6 +397,16 @@ export interface SustainedResult {
   allocationDelta: number | null
   heapSizeMB: number
   rssMB: number
+  // --- task-10 additions (appended only) ---
+  cpuUserUs: number
+  cpuSystemUs: number
+  cpuTotalUs: number
+  dfgCompilesDelta: number | null
+  ftlCompilesDelta: number | null
+  osrExitsDelta: number | null
+  highWaterRssMB: number
+  /** Per-tick heap time-series (sampled every Nth tick, capped at 500 entries). */
+  heapTimeSeries: HeapSample[] | null
 }
 
 // ---------------------------------------------------------------------------
@@ -280,6 +415,7 @@ export interface SustainedResult {
 
 export async function benchSustained(scenario: SustainedScenario): Promise<SustainedResult> {
   const warmupTicks = scenario.warmupTicks ?? 50
+  const collectHeapTimeSeries = scenario.collectHeapTimeSeries === true
 
   // 1. Setup
   scenario.setup?.()
@@ -318,6 +454,14 @@ export async function benchSustained(scenario: SustainedScenario): Promise<Susta
   await Bun.sleep(100)
 
   // 4. Warmup — prime JIT without timing
+  // --- task-10: CPU / JIT bracket begins immediately BEFORE warmup ---
+  const cpuStart = process.cpuUsage()
+  const jitStart = {
+    dfg: dfgCompilesFn !== null ? dfgCompilesFn() : null,
+    ftl: ftlCompilesFn !== null ? ftlCompilesFn() : null,
+    osrExits: osrExitsFn !== null ? osrExitsFn() : null,
+  }
+
   for (let i = 0; i < warmupTicks; i++) scenario.tick()
 
   // 5. GC + sleep before measurement window
@@ -334,6 +478,17 @@ export async function benchSustained(scenario: SustainedScenario): Promise<Susta
   const maxTicks = Math.ceil(scenario.durationMs * 100)
   const latencies = new Float64Array(maxTicks)
   let ticksCompleted = 0
+
+  // --- task-10: heap time-series setup
+  // Estimate expected ticks from durationMs * typical rate.
+  // Use conservative upper bound of durationMs * 6000 ticks/sec (well above B8 rates).
+  // N = max(50, ceil(expectedTicks / 500)) to keep samples <= 500 and spanning full window.
+  const expectedTicks = scenario.durationMs * 6000 / 1000  // ~ ticks we expect
+  const timeSeriesN = Math.max(50, Math.ceil(expectedTicks / 500))
+  const heapTimeSeries: HeapSample[] = []
+
+  // --- task-10: high-water RSS — sampled at each tick boundary (affordable in sustained mode)
+  let highWaterRssBytes = process.memoryUsage().rss
 
   // 7 + 8. Timing loop with runaway guard
   const windowStart = Bun.nanoseconds()
@@ -355,10 +510,24 @@ export async function benchSustained(scenario: SustainedScenario): Promise<Susta
           `(Math.ceil(durationMs * 100) = Math.ceil(${scenario.durationMs} * 100)).`,
       )
     }
+
+    // --- task-10: per-tick RSS sample (before tick body)
+    const tickRss = process.memoryUsage().rss
+    if (tickRss > highWaterRssBytes) highWaterRssBytes = tickRss
+
     const t0 = Bun.nanoseconds()
     scenario.tick()
     latencies[ticksCompleted] = Bun.nanoseconds() - t0
     ticksCompleted++
+
+    // --- task-10: throttled heap time-series sample
+    if (collectHeapTimeSeries && heapTimeSeries.length < 500 && ticksCompleted % timeSeriesN === 0) {
+      heapTimeSeries.push({
+        tick: ticksCompleted,
+        liveObjects: liveObjectCount(heapStats()),
+        rssMB: +(process.memoryUsage().rss / (1024 * 1024)).toFixed(2),
+      })
+    }
   }
 
   // 9. Teardown
@@ -369,7 +538,20 @@ export async function benchSustained(scenario: SustainedScenario): Promise<Susta
   await Bun.sleep(100)
   const finalStats = heapStats()
   const heapSizeMB = +(finalStats.heapSize / 1024 / 1024).toFixed(2)
-  const rssMB = +(process.memoryUsage().rss / 1024 / 1024).toFixed(2)
+
+  // --- task-10: read CPU / JIT end (bracket ends AFTER post-loop GC + sleep)
+  const cpuEnd = process.cpuUsage(cpuStart)
+  const jitEnd = {
+    dfg: dfgCompilesFn !== null ? dfgCompilesFn() : null,
+    ftl: ftlCompilesFn !== null ? ftlCompilesFn() : null,
+    osrExits: osrExitsFn !== null ? osrExitsFn() : null,
+  }
+
+  // Final RSS — sampled once and used for both rssMB and high-water update so
+  // highWaterRssMB >= rssMB is guaranteed regardless of post-GC RSS movement.
+  const finalRssBytes = process.memoryUsage().rss
+  if (finalRssBytes > highWaterRssBytes) highWaterRssBytes = finalRssBytes
+  const rssMB = +(finalRssBytes / (1024 * 1024)).toFixed(2)
 
   // 11. Compute statistics from filled prefix — convert ns → ms
   const used = latencies.subarray(0, ticksCompleted)
@@ -395,7 +577,23 @@ export async function benchSustained(scenario: SustainedScenario): Promise<Susta
   const p999TickMs = +(sorted[Math.floor(n * 0.999)]! / 1_000_000).toFixed(4)
   const maxTickMs = +(sorted[n - 1]! / 1_000_000).toFixed(4)
 
-  // 12. Return result — capacity left undefined unless set by benchScaling
+  // 12. Compute task-10 CPU / JIT / RSS fields
+  const cpuUserUs = cpuEnd.user
+  const cpuSystemUs = cpuEnd.system
+  const cpuTotalUs = cpuEnd.user + cpuEnd.system
+
+  const dfgCompilesDelta =
+    jitEnd.dfg !== null && jitStart.dfg !== null ? jitEnd.dfg - jitStart.dfg : null
+  const ftlCompilesDelta =
+    jitEnd.ftl !== null && jitStart.ftl !== null ? jitEnd.ftl - jitStart.ftl : null
+  const osrExitsDelta =
+    jitEnd.osrExits !== null && jitStart.osrExits !== null
+      ? jitEnd.osrExits - jitStart.osrExits
+      : null
+
+  const highWaterRssMB = +(highWaterRssBytes / (1024 * 1024)).toFixed(2)
+
+  // 13. Return result — capacity left undefined unless set by benchScaling
   return {
     name: scenario.name,
     ticksCompleted,
@@ -408,6 +606,14 @@ export async function benchSustained(scenario: SustainedScenario): Promise<Susta
     allocationDelta,
     heapSizeMB,
     rssMB,
+    cpuUserUs,
+    cpuSystemUs,
+    cpuTotalUs,
+    dfgCompilesDelta,
+    ftlCompilesDelta,
+    osrExitsDelta,
+    highWaterRssMB,
+    heapTimeSeries: collectHeapTimeSeries ? heapTimeSeries : null,
   }
 }
 
@@ -433,6 +639,7 @@ export async function benchScaling<T extends SustainedScenario>(
 
 // ---------------------------------------------------------------------------
 // formatSustainedTable — plain-text fixed-width table for sustained results
+// Strategy: widen-the-table (add cpuMs, dfgΔ, hwRssMB columns without removing any)
 // ---------------------------------------------------------------------------
 
 export function formatSustainedTable(results: SustainedResult[]): string {
@@ -447,6 +654,9 @@ export function formatSustainedTable(results: SustainedResult[]): string {
   const COL_ALLOC = 10
   const COL_HEAP = 9
   const COL_RSS = 9
+  const COL_CPU_MS = 10
+  const COL_DFG = 7
+  const COL_HW_RSS = 10
 
   function pad(s: string, n: number, right = false): string {
     return right ? s.padStart(n) : s.padEnd(n)
@@ -472,6 +682,9 @@ export function formatSustainedTable(results: SustainedResult[]): string {
     pad('allocΔ', COL_ALLOC, true),
     pad('heapMB', COL_HEAP, true),
     pad('rssMB', COL_RSS, true),
+    pad('cpuMs', COL_CPU_MS, true),
+    pad('dfgΔ', COL_DFG, true),
+    pad('hwRssMB', COL_HW_RSS, true),
   ].join('  ')
 
   const sep = '-'.repeat(header.length)
@@ -489,8 +702,68 @@ export function formatSustainedTable(results: SustainedResult[]): string {
       pad(fmtAlloc(r.allocationDelta), COL_ALLOC, true),
       pad(r.heapSizeMB.toFixed(2), COL_HEAP, true),
       pad(r.rssMB.toFixed(2), COL_RSS, true),
+      pad((r.cpuTotalUs / 1000).toFixed(1), COL_CPU_MS, true),
+      pad(r.dfgCompilesDelta !== null ? r.dfgCompilesDelta.toString() : '-', COL_DFG, true),
+      pad(r.highWaterRssMB.toFixed(2), COL_HW_RSS, true),
     ].join('  '),
   )
 
   return [header, sep, ...rows].join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// formatSparkline — ASCII sparkline using Unicode block characters
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a sparkline string of up to 40 characters rendered from the input
+ * number series using Unicode block characters ▁▂▃▄▅▆▇█.
+ *
+ * - If series.length <= 1 or min === max, returns flat ▄ × min(length, 40).
+ * - If series.length > 40, downsamples by taking every ceil(length/40)th element.
+ * - Pure function, no side effects.
+ */
+export function formatSparkline(series: readonly number[]): string {
+  const BLOCKS = '▁▂▃▄▅▆▇█'
+  const MAX_CHARS = 40
+
+  if (series.length === 0) return ''
+
+  // Downsample if needed
+  let sampled: readonly number[]
+  if (series.length > MAX_CHARS) {
+    const stride = Math.ceil(series.length / MAX_CHARS)
+    const downsampled: number[] = []
+    for (let i = 0; i < series.length; i += stride) {
+      downsampled.push(series[i]!)
+    }
+    sampled = downsampled
+  } else {
+    sampled = series
+  }
+
+  if (sampled.length <= 1) {
+    return '▄'
+  }
+
+  let min = sampled[0]!
+  let max = sampled[0]!
+  for (const v of sampled) {
+    if (v < min) min = v
+    if (v > max) max = v
+  }
+
+  // Flat series — return constant sparkline
+  if (min === max) {
+    return '▄'.repeat(sampled.length)
+  }
+
+  const range = max - min
+  return sampled
+    .map((v) => {
+      const normalized = (v - min) / range
+      const bucket = Math.min(7, Math.floor(normalized * 8))
+      return BLOCKS[bucket]!
+    })
+    .join('')
 }

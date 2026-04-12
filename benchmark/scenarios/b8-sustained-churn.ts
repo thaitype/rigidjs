@@ -63,6 +63,8 @@ export const b8JsBaseline: SustainedScenario = {
   name: 'B8 JS baseline (100k, 1k churn/tick, 10s)',
   durationMs: DURATION_MS,
   warmupTicks: 50,
+  // task-10: enable per-tick heap time-series for the sawtooth vs flatline visualization
+  collectHeapTimeSeries: true,
 
   setup() {
     // Reset all module-level state for a clean measurement
@@ -162,6 +164,8 @@ export const b8RigidJs: SustainedScenario = {
   name: 'B8 RigidJS slab (100k, 1k churn/tick, 10s)',
   durationMs: DURATION_MS,
   warmupTicks: 50,
+  // task-10: enable per-tick heap time-series for the sawtooth vs flatline visualization
+  collectHeapTimeSeries: true,
 
   setup() {
     rigidS = slab(Particle, CAPACITY)
