@@ -16,29 +16,45 @@ describe('Particle sizeof', () => {
   })
 })
 
-describe('Particle field offsets via raw DataView', () => {
-  it('pos starts at byte 0 (pos.x at offset 0)', () => {
+// ---------------------------------------------------------------------------
+// SoA column byte offsets for Particle (capacity=1):
+// Natural-alignment sort puts all f64 first, then f32, then u32.
+// Columns in sorted order: pos.x(0), pos.y(8), pos.z(16), vel.x(24), vel.y(32),
+//   vel.z(40), life(48), id(52)
+// At capacity=1: bufByteOffset = colByteOffset * 1 = colByteOffset
+// So DataView offsets match the per-slot offsets exactly.
+// ---------------------------------------------------------------------------
+
+describe('Particle field offsets via raw DataView (SoA capacity=1)', () => {
+  it('pos.x is at byte offset 0 in the SoA layout (f64, first column)', () => {
     const { handle, view } = createSingleSlot(Particle)
     const p = handle as { pos: { x: number; y: number; z: number }; vel: { x: number }; life: number; id: number }
     p.pos.x = 1.5
     expect(view.getFloat64(0, true)).toBe(1.5)
   })
 
-  it('vel starts at byte 24 (vel.x at offset 24)', () => {
+  it('pos.y is at byte offset 8', () => {
+    const { handle, view } = createSingleSlot(Particle)
+    const p = handle as { pos: { x: number; y: number; z: number }; vel: { x: number }; life: number; id: number }
+    p.pos.y = 2.5
+    expect(view.getFloat64(8, true)).toBe(2.5)
+  })
+
+  it('vel.x is at byte offset 24 (4th column after pos.x, pos.y, pos.z)', () => {
     const { handle, view } = createSingleSlot(Particle)
     const p = handle as { pos: { x: number }; vel: { x: number }; life: number; id: number }
     p.vel.x = -1
     expect(view.getFloat64(24, true)).toBe(-1)
   })
 
-  it('life is at byte 48', () => {
+  it('life is at byte offset 48 (after all 6 f64 columns)', () => {
     const { handle, view } = createSingleSlot(Particle)
     const p = handle as { pos: { x: number }; vel: { x: number }; life: number; id: number }
     p.life = 0.25
     expect(view.getFloat32(48, true)).toBe(0.25)
   })
 
-  it('id is at byte 52', () => {
+  it('id is at byte offset 52', () => {
     const { handle, view } = createSingleSlot(Particle)
     const p = handle as { pos: { x: number }; vel: { x: number }; life: number; id: number }
     p.id = 42
@@ -109,61 +125,46 @@ describe('sub-handle identity — no per-access allocation', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Rebasing test: two slots in one ArrayBuffer
+// Rebasing test (SoA path): use a slab with capacity=2 to test rebasing.
+// In SoA layout, the slab handles the buffer; we verify correctness through
+// the slab's public API (handle read-back) rather than raw DataView byte checks
+// which are AoS-layout-specific.
 // ---------------------------------------------------------------------------
 
-describe('_rebase — offset rebasing across two slots', () => {
+import { slab } from '../../src/slab/slab.js'
+
+describe('_rebase — offset rebasing across two slots (SoA via slab)', () => {
   it('rebasing handle to slot 1 writes/reads independently from slot 0', () => {
-    const sizeof = Particle.sizeof // 56
-    const buffer = new ArrayBuffer(sizeof * 2)
-    const view = new DataView(buffer)
-
-    if (!Particle._Handle) throw new Error('Particle._Handle missing')
-
-    // Construct handle at slot 0 (offset 0)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const handle = new (Particle._Handle as any)(view, 0) as {
-      pos: { x: number; y: number; z: number }
-      vel: { x: number }
-      life: number
-      id: number
-      _rebase(view: DataView, offset: number): unknown
-    }
+    const s = slab(Particle, 2)
 
     // Write data to slot 0
-    handle.pos.x = 10
-    handle.pos.y = 20
-    handle.vel.x = -5
-    handle.life = 0.5
-    handle.id = 1
+    const h0 = s.insert() as any
+    h0.pos.x = 10
+    h0.pos.y = 20
+    h0.vel.x = -5
+    h0.life = 0.5
+    h0.id = 1
 
-    // Rebase handle to slot 1 (offset = sizeof)
-    handle._rebase(view, sizeof)
-
-    // Write different data to slot 1
-    handle.pos.x = 99
-    handle.pos.y = 88
-    handle.vel.x = -99
-    handle.life = 0.9
-    handle.id = 2
+    // Write data to slot 1
+    const h1 = s.insert() as any
+    h1.pos.x = 99
+    h1.pos.y = 88
+    h1.vel.x = -99
+    h1.life = 0.9
+    h1.id = 2
 
     // Verify slot 1 data via handle
-    expect(handle.pos.x).toBe(99)
-    expect(handle.pos.y).toBe(88)
-    expect(handle.vel.x).toBe(-99)
-    expect(handle.id).toBe(2)
+    expect(h1.pos.x).toBe(99)
+    expect(h1.pos.y).toBe(88)
+    expect(h1.vel.x).toBe(-99)
+    expect(h1.id).toBe(2)
 
-    // Verify slot 0 bytes are untouched
-    expect(view.getFloat64(0, true)).toBe(10)     // slot0 pos.x
-    expect(view.getFloat64(8, true)).toBe(20)     // slot0 pos.y
-    expect(view.getFloat64(24, true)).toBe(-5)    // slot0 vel.x
-    expect(view.getUint32(52, true)).toBe(1)      // slot0 id
-
-    // Verify slot 1 bytes are correct
-    expect(view.getFloat64(sizeof + 0, true)).toBe(99)    // slot1 pos.x
-    expect(view.getFloat64(sizeof + 8, true)).toBe(88)    // slot1 pos.y
-    expect(view.getFloat64(sizeof + 24, true)).toBe(-99)  // slot1 vel.x
-    expect(view.getUint32(sizeof + 52, true)).toBe(2)     // slot1 id
+    // Verify slot 0 data is untouched (get() rebases the handle to slot 0)
+    const g0 = s.get(0) as any
+    expect(g0.pos.x).toBe(10)
+    expect(g0.pos.y).toBe(20)
+    expect(g0.vel.x).toBe(-5)
+    expect(g0.id).toBe(1)
   })
 })
 
@@ -189,32 +190,20 @@ describe('2-level nested struct — recursive rebasing', () => {
     expect(h.outer.inner.z).toBe(9.9)
   })
 
-  it('_rebase propagates through 2 levels', () => {
-    const sizeof = Deep.sizeof // 24
-    const buffer = new ArrayBuffer(sizeof * 2)
-    const view = new DataView(buffer)
-
-    if (!Deep._Handle) throw new Error('Deep._Handle missing')
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const handle = new (Deep._Handle as any)(view, 0) as {
-      outer: { inner: { x: number } }
-      _rebase(view: DataView, offset: number): unknown
-    }
+  it('_rebase propagates through 2 levels (SoA via slab)', () => {
+    const s = slab(Deep, 2)
 
     // Write to slot 0
-    handle.outer.inner.x = 1.1
-
-    // Rebase to slot 1
-    handle._rebase(view, sizeof)
+    const h0 = s.insert() as any
+    h0.outer.inner.x = 1.1
 
     // Write to slot 1
-    handle.outer.inner.x = 2.2
+    const h1 = s.insert() as any
+    h1.outer.inner.x = 2.2
 
     // Verify both slots are distinct
-    expect(view.getFloat64(0, true)).toBe(1.1)           // slot 0
-    expect(view.getFloat64(sizeof, true)).toBe(2.2)      // slot 1
-    expect(handle.outer.inner.x).toBe(2.2)
+    expect((s.get(0) as any).outer.inner.x).toBe(1.1)
+    expect((s.get(1) as any).outer.inner.x).toBe(2.2)
   })
 
   it('sub-handle identity is preserved after rebase (outer === outer)', () => {

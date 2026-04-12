@@ -69,16 +69,22 @@ describe('handle round-trip — mixed-type flat struct', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Raw DataView byte verification — little-endian proof
+// Raw DataView byte verification — SoA column layout proof
+//
+// With SoA natural-alignment sort, columns are ordered by element size descending.
+// For { pad: u32, val: f64 }: val (f64, 8 bytes) sorts before pad (u32, 4 bytes).
+// At capacity=1: bufByteOffset = colByteOffset * 1 = colByteOffset.
+// So val is at byteOffset 0 and pad is at byteOffset 8.
 // ---------------------------------------------------------------------------
-describe('handle — little-endian byte layout verification', () => {
-  it('u32 value 0x12345678 at offset 0 stores 0x78 in byte 0 (little-endian)', () => {
+describe('handle — SoA byte layout verification', () => {
+  it('u32 value 0x12345678 in single-field struct is at offset 0', () => {
     const Def = struct({ val: 'u32' })
     const { handle, view } = createSingleSlot(Def)
 
     const h = handle as { val: number }
     h.val = 0x12345678
 
+    // Only field in struct: at offset 0.
     // Little-endian: least-significant byte first.
     // 0x12345678 → bytes [0x78, 0x56, 0x34, 0x12] at offsets [0, 1, 2, 3]
     expect(view.getUint8(0)).toBe(0x78)
@@ -87,8 +93,10 @@ describe('handle — little-endian byte layout verification', () => {
     expect(view.getUint8(3)).toBe(0x12)
   })
 
-  it('f64 value at offset 4 stores bytes at correct positions with offset applied', () => {
-    // struct { pad: u32, val: f64 } — val starts at byte 4
+  it('f64 value in { pad: u32, val: f64 } is at offset 0 (f64 sorts first in SoA)', () => {
+    // SoA natural-alignment sort: val (f64, 8 bytes) sorts before pad (u32, 4 bytes).
+    // capacity=1: byteOffset * 1 = byteOffset.
+    // val column: byteOffset=0, pad column: byteOffset=8.
     const Def = struct({ pad: 'u32', val: 'f64' })
     expect(Def.sizeof).toBe(12) // 4 + 8
 
@@ -98,8 +106,10 @@ describe('handle — little-endian byte layout verification', () => {
     h.pad = 0
     h.val = 1.0
 
-    // Read back the f64 directly from the DataView at offset 4 to verify placement
-    expect(view.getFloat64(4, true)).toBe(1.0)
+    // val (f64) is at offset 0 in SoA layout (largest element size first)
+    expect(view.getFloat64(0, true)).toBe(1.0)
+    // pad (u32) is at offset 8 in SoA layout
+    expect(view.getUint32(8, true)).toBe(0)
   })
 })
 

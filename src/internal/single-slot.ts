@@ -1,12 +1,19 @@
 import type { StructDef, StructFields } from '../types.js'
+import { slab } from '../slab/slab.js'
 
 /**
  * The result of createSingleSlot.
- * Provides the typed handle, the DataView, and the underlying buffer
- * for low-level byte verification in tests.
+ * Provides the typed handle, a DataView over the backing buffer, and the
+ * underlying buffer itself for low-level byte verification in tests.
+ *
+ * NOTE (milestone-3): The internal storage is SoA — each column occupies a
+ * separate TypedArray sub-range of the buffer. For a capacity-1 slab,
+ * column[i] starts at byte `byteOffset * 1 = byteOffset` in the buffer
+ * (same as the per-slot byte offset). DataView reads at these offsets still
+ * reflect written values correctly.
  */
 export interface SingleSlot<F extends StructFields> {
-  handle: InstanceType<NonNullable<StructDef<F>['_Handle']>>
+  handle: object
   view: DataView
   buffer: ArrayBuffer
 }
@@ -14,29 +21,22 @@ export interface SingleSlot<F extends StructFields> {
 /**
  * Internal test-only helper. NOT re-exported from src/index.ts.
  *
- * Allocates one ArrayBuffer of size def.sizeof, wraps it in a DataView,
- * and constructs one handle at base offset 0 via the StructDef's internal
- * handle constructor (_Handle).
+ * Creates a 1-capacity slab for the given struct definition, inserts one slot,
+ * and returns the handle, a DataView over the backing buffer, and the buffer
+ * itself for raw byte verification in tests.
  *
- * Used only by milestone-1 tests to exercise handle round-trips without
- * a real container (slab/vec/bump).
+ * Using slab(def, 1) means the single-slot layout is:
+ *   - capacity=1: bufByteOffset = colByteOffset * 1 = colByteOffset
+ *   - Each column's TypedArray starts at its per-slot byte offset
+ *   - DataView reads at these offsets return the correct values
  *
  * @param def A StructDef produced by struct().
  * @returns { handle, view, buffer }
  */
 export function createSingleSlot<F extends StructFields>(def: StructDef<F>): SingleSlot<F> {
-  if (!def._Handle) {
-    throw new Error('createSingleSlot: StructDef has no _Handle — was it created by struct()?')
-  }
-
-  const buffer = new ArrayBuffer(def.sizeof)
-  const view = new DataView(buffer)
-  // `any` is required here to bridge the generated handle constructor's
-  // opaque `object` return type to the typed SingleSlot shape.
-  // This is an intentional boundary — the generated class has no static
-  // TS type; `any` is isolated to this one call site.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handle = new (def._Handle as any)(view, 0, 0) as InstanceType<NonNullable<StructDef<F>['_Handle']>>
-
-  return { handle, view, buffer }
+  const s = slab(def, 1)
+  const handle = s.insert() as object
+  const buf = s.buffer
+  const view = new DataView(buf)
+  return { handle, view, buffer: buf }
 }

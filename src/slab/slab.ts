@@ -1,4 +1,6 @@
-import type { StructDef, StructFields, Handle } from '../types.js'
+import type { StructDef, StructFields, Handle, ColumnKey, ColumnType } from '../types.js'
+import { generateSoAHandleClass } from '../struct/handle-codegen.js'
+import type { ColumnRef } from '../struct/handle-codegen.js'
 import { bitmapByteLength, bitmapSet, bitmapClear, bitmapGet } from './bitmap.js'
 
 export type { Handle }
@@ -13,6 +15,12 @@ export type { Handle }
  * All returned handles are the SAME object instance — do not hold references
  * past the next insert() / get() / remove() call without copying field values
  * out into JS primitives first.
+ *
+ * Storage strategy (milestone-3): Structure-of-Arrays (SoA) layout.
+ * One ArrayBuffer holds all columns end-to-end. Each column occupies a
+ * contiguous TypedArray sub-view of `capacity` elements. Handles use
+ * TypedArray indexed access — no DataView, no per-slot byte arithmetic at
+ * field-access time.
  */
 export interface Slab<F extends StructFields> {
   /**
@@ -64,6 +72,20 @@ export interface Slab<F extends StructFields> {
 
   /** Underlying ArrayBuffer — escape hatch for power users. Read-only reference. */
   readonly buffer: ArrayBuffer
+
+  /**
+   * Returns the pre-built TypedArray column view for the named column.
+   *
+   * Allocation-free: views are pre-constructed at slab creation time and
+   * stored in a Map keyed by dotted column name (e.g. 'pos.x', 'life').
+   * Call this ONCE before a hot loop and iterate the returned TypedArray directly.
+   *
+   * `column(name).buffer === slab.buffer` is guaranteed (same ArrayBuffer).
+   *
+   * @throws "unknown column: <name>" for invalid column names.
+   * @throws "slab has been dropped" after drop().
+   */
+  column<K extends ColumnKey<F>>(name: K): ColumnType<F, K>
 }
 
 // ---------------------------------------------------------------------------
@@ -73,9 +95,14 @@ export interface Slab<F extends StructFields> {
 /**
  * Create a fixed-capacity slab container for the given struct definition.
  *
- * Exactly one ArrayBuffer and one DataView are allocated per slab().
- * One handle instance is pre-built and reused across all insert()/get() calls
- * (zero per-call allocations on hot paths).
+ * Storage layout (SoA — milestone-3):
+ *   - Exactly ONE `ArrayBuffer` of size `sizeofPerSlot * capacity`.
+ *   - Columns are laid out in natural-alignment order (largest element size first),
+ *     guaranteeing every TypedArray view is properly aligned without padding.
+ *     Column i starts at byte `column[i].byteOffset * capacity` in the buffer.
+ *   - One TypedArray sub-view per column: `new TypedArrayCtor(buf, byteOffset * capacity, capacity)`.
+ *   - One reusable handle instance built by generateSoAHandleClass with closure-captured column refs.
+ *   - Rebasing is slot-only: `_rebase(slot)` — no DataView, no byte arithmetic.
  *
  * @param def       A StructDef produced by struct().
  * @param capacity  Positive integer — maximum number of simultaneous entries.
@@ -90,27 +117,74 @@ export function slab<F extends StructFields>(
   if (!Number.isInteger(capacity) || capacity <= 0) {
     throw new Error('slab: capacity must be a positive integer')
   }
-  if (!def._Handle) {
-    throw new Error('slab: StructDef has no _Handle — was it created by struct()?')
+  if (!def._columnLayout) {
+    throw new Error('slab: StructDef has no _columnLayout — was it created by struct()?')
   }
 
-  // --- One-time allocations ---
-  // Exactly ONE ArrayBuffer and ONE DataView — enforced by task spec + grep.
-  const _buf = new ArrayBuffer(def.sizeof * capacity)
-  const _view = new DataView(_buf)
+  // --- Compute column layout ---
+  // Use the pre-computed layout from def._columnLayout (already done at struct() time).
+  // This avoids re-running the layout computation on every slab() call.
+  const layout = def._columnLayout
 
-  // Occupancy bitmap: bit i set iff slot i is occupied.
+  // --- Single ArrayBuffer allocation ---
+  // Total bytes = sizeofPerSlot * capacity.
+  // (sizeofPerSlot is the sum of all column element sizes, invariant to SoA vs AoS.)
+  const _buf = new ArrayBuffer(layout.sizeofPerSlot * capacity)
+
+  // --- Build one TypedArray sub-view per column ---
+  //
+  // SoA buffer layout (capacity = N, columns sorted largest-first):
+  //   [col0: byteOffset=0,  length=N] [col1: byteOffset=8, length=N] ...
+  //
+  // The byte start of column i in the buffer is: column[i].byteOffset * capacity.
+  // This is because byteOffset is the per-slot byte offset within a "sizeof" slice,
+  // and in SoA we lay out capacity elements of column i contiguously before column i+1.
+  //
+  // Alignment invariant (from task-2 §2):
+  //   The natural-alignment sort guarantees that for every column i,
+  //   (byteOffset[i] * capacity) is a multiple of elementSize[i].
+  //   Proof: byteOffset[i] is already a multiple of elementSize[i] (proven by the sort),
+  //   and multiplying by any integer preserves divisibility.
+  //   Therefore new TypedArrayCtor(buf, byteOffset * capacity, capacity) will never throw
+  //   an alignment error. We assert this at runtime as a belt-and-suspenders check.
+  const _columnMap = new Map<string, Float64Array | Float32Array | Uint32Array | Uint16Array | Uint8Array | Int32Array | Int16Array | Int8Array>()
+  const columnRefs = new Map<string, ColumnRef>()
+
+  for (const col of layout.columns) {
+    const bufByteOffset = col.byteOffset * capacity
+
+    // Alignment assertion: bufByteOffset must be a multiple of col.elementSize.
+    // This follows from the task-2 alignment invariant: byteOffset is a multiple of
+    // elementSize (natural-alignment sort), and multiplying by capacity preserves that.
+    // If this assertion fires, the column layout has an alignment bug.
+    if (bufByteOffset % col.elementSize !== 0) {
+      throw new Error(
+        `slab: alignment violation for column '${col.name}': ` +
+        `bufByteOffset=${bufByteOffset} is not a multiple of elementSize=${col.elementSize}. ` +
+        `This violates the task-2 natural-alignment invariant.`,
+      )
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TypedArray ctor is a union; any is required to call new
+    const array = new (col.typedArrayCtor as any)(_buf, bufByteOffset, capacity) as
+      Float64Array | Float32Array | Uint32Array | Uint16Array | Uint8Array | Int32Array | Int16Array | Int8Array
+
+    _columnMap.set(col.name, array)
+    columnRefs.set(col.name, { name: col.name, array })
+  }
+
+  // --- Build the reusable SoA handle ---
+  // generateSoAHandleClass builds a class whose field getters/setters do pure TypedArray
+  // indexed access: `this._c_pos_x[this._slot]`. Column TypedArrays are captured in the
+  // class closure at construction time — no per-call lookup, no allocation.
+  const HandleClass = generateSoAHandleClass(layout.handleTree, columnRefs)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SoAHandleConstructor returns `object`; any isolates the bridge
+  const _handle = new (HandleClass as any)(0) as Handle<F>
+
+  // --- Bitmap + free-list (unchanged from AoS path) ---
   const _bits = new Uint8Array(bitmapByteLength(capacity))
-
-  // Free-list seeded descending so pop() returns 0, 1, 2, ... in order.
   const _freeList: number[] = []
   for (let i = capacity - 1; i >= 0; i--) _freeList.push(i)
-
-  // One reusable handle instance — rebased on every insert()/get() call.
-  // `any` is required here to bridge the generated constructor's opaque
-  // `object` return type to the typed Handle<F> shape. Isolated to this site.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const _handle = new (def._Handle as any)(_view, 0, 0) as Handle<F>
 
   let _len = 0
   let _dropped = false
@@ -131,10 +205,9 @@ export function slab<F extends StructFields>(
       if (slot === undefined) throw new Error('slab at capacity')
       bitmapSet(_bits, slot)
       _len++
-      // `any` cast isolated here — _rebase is generated by handle-codegen.ts
-      // and not part of the static TS type. See src/struct/handle-codegen.ts.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;((_handle as any)._rebase(_view, slot * def.sizeof, slot))
+      // SoA _rebase takes only (slot) — no DataView, no byte offset.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated and not in static TS type
+      ;((_handle as any)._rebase(slot))
       return _handle
     },
 
@@ -156,9 +229,9 @@ export function slab<F extends StructFields>(
       if (!Number.isInteger(index) || index < 0 || index >= capacity) {
         throw new Error('slab: index out of range')
       }
-      // `any` cast isolated here — same boundary as insert().
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;((_handle as any)._rebase(_view, index * def.sizeof, index))
+      // SoA _rebase takes only (slot) — same boundary as insert().
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- same boundary as insert()
+      ;((_handle as any)._rebase(index))
       return _handle
     },
 
@@ -200,6 +273,18 @@ export function slab<F extends StructFields>(
     get buffer(): ArrayBuffer {
       assertLive()
       return _buf
+    },
+
+    column<K extends ColumnKey<F>>(name: K): ColumnType<F, K> {
+      assertLive()
+      const arr = _columnMap.get(name)
+      if (arr === undefined) {
+        throw new Error(`unknown column: ${name}`)
+      }
+      // The runtime TypedArray subclass for this column was determined by the column's
+      // numeric token at slab construction time and is guaranteed to match ColumnType<F, K>
+      // by the layout invariants established in task-2 (see computeColumnLayout).
+      return arr as unknown as ColumnType<F, K>
     },
   }
 }

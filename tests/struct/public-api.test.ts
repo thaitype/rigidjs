@@ -4,7 +4,7 @@
  * This verifies the public surface — no internal helpers are used here.
  */
 import { describe, it, expect } from 'bun:test'
-import { struct } from '../../src/index.js'
+import { struct, slab } from '../../src/index.js'
 import type { StructDef, StructFields, NumericType } from '../../src/index.js'
 
 // ---------------------------------------------------------------------------
@@ -29,7 +29,9 @@ describe('public API — Particle sizeof and field offsets', () => {
     expect(Particle.sizeof).toBe(56)
   })
 
-  it('Particle._offsets has correct byte offsets', () => {
+  it('Particle._offsets has correct byte offsets (AoS offsets preserved for compatibility)', () => {
+    // _offsets is preserved from the AoS layout computation for test compatibility.
+    // These are per-slot byte offsets in declaration order (NOT physical SoA buffer offsets).
     const offsets = Particle._offsets!
     expect(offsets.get('pos')!.offset).toBe(0)
     expect(offsets.get('vel')!.offset).toBe(24)
@@ -53,17 +55,14 @@ describe('public API — empty fields guard', () => {
 
 // ---------------------------------------------------------------------------
 // Handle field access is typed as number (type-level check via satisfies)
+// Updated for milestone-3 SoA: _Handle is no longer on StructDef.
+// Use slab(def, 1) to get a handle and verify field access is typed.
 // ---------------------------------------------------------------------------
 describe('public API — handle field access typed as number', () => {
   it('reading a f64 field satisfies the number type', () => {
     const Vec3 = struct({ v: 'f64' })
-    const buf = new ArrayBuffer(Vec3.sizeof)
-    const view = new DataView(buf)
-
-    if (!Vec3._Handle) throw new Error('Vec3._Handle missing')
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const handle = new (Vec3._Handle as any)(view, 0) as { v: number }
+    const s = slab(Vec3, 1)
+    const handle = s.insert() as { v: number }
 
     handle.v = 42.5
     // Type-level check: the expression `handle.v` satisfies number

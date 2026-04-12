@@ -22,14 +22,20 @@ export type FieldType = NumericType | StructDef<StructFields>
  * They are NOT part of the public contract and may change without notice.
  * Prefixed with underscore and marked as optional so they do not appear
  * in public type signatures while still being accessible internally.
+ *
+ * NOTE (milestone-3): `_Handle` is now the SoA handle constructor (slot: number) => object.
+ * The AoS constructor signature (view: DataView, baseOffset: number, slot: number) has been removed.
+ * `_offsets` is preserved for tests that read Particle._offsets (public-api.test.ts).
  */
 export interface StructDef<F extends StructFields> {
   readonly sizeof: number
   readonly fields: F
-  /** @internal Generated handle constructor — implementation detail. */
-  readonly _Handle?: new (view: DataView, baseOffset: number, slot: number) => object
-  /** @internal Offset table — implementation detail. */
+  /** @internal Generated SoA handle constructor — implementation detail. (slot: number) */
+  readonly _Handle?: new (slot: number) => object
+  /** @internal Offset table — implementation detail. Preserved for milestone-1 test compatibility. */
   readonly _offsets?: ReadonlyMap<string, { offset: number; type: FieldType }>
+  /** @internal Column layout — implementation detail for SoA containers. */
+  readonly _columnLayout?: import('./struct/layout.js').ColumnLayout
 }
 
 /**

@@ -1,6 +1,59 @@
 import { mkdir } from 'node:fs/promises'
 import { runAll, formatTable, benchSustained, benchScaling, formatSustainedTable, formatSparkline, jitCountersAvailable } from './harness.js'
 import type { BenchResult, SustainedResult } from './harness.js'
+
+// ---------------------------------------------------------------------------
+// Write-split helpers
+// ---------------------------------------------------------------------------
+// Committed results.json files must NOT contain heapTimeSeries arrays or other
+// bulk per-tick data. These are stripped from results.json and written to a
+// gitignored raw-timeseries.json companion file. This keeps committed diffs small
+// and prevents time-series arrays from bloating repo history across runs.
+// ---------------------------------------------------------------------------
+
+/**
+ * Strip array-valued fields from a SustainedResult for scalar-only JSON commit.
+ * Currently strips: `heapTimeSeries` (the only bulk array added so far).
+ * The field is completely omitted (not set to null) in the returned object.
+ */
+function stripSustainedArrays(r: SustainedResult): Omit<SustainedResult, 'heapTimeSeries'> {
+  const { heapTimeSeries: _, ...rest } = r
+  return rest
+}
+
+/**
+ * Write a results.json (scalar metrics only) and a raw-timeseries.json (bulk arrays)
+ * to the given directory. Includes a `rawTimeseriesPath` reference in meta.
+ *
+ * @param dir         Target report directory (must already exist or be created before calling).
+ * @param payload     The full payload with all fields, including heapTimeSeries arrays.
+ * @param timeseriesPayload  The arrays to commit to the raw-timeseries.json companion.
+ */
+async function writeReportSplit(
+  dir: string,
+  payload: object,
+  timeseriesPayload: object,
+): Promise<void> {
+  const resultsPath = `${dir}/results.json`
+  const rawPath = `${dir}/raw-timeseries.json`
+
+  await Bun.write(resultsPath, JSON.stringify(payload, null, 2))
+  await Bun.write(rawPath, JSON.stringify(timeseriesPayload, null, 2))
+}
+
+/**
+ * Strip heapTimeSeries from a list of SustainedResults.
+ * Returns both the scalar list (heapTimeSeries omitted) and the time-series list (paired by index).
+ */
+function splitSustainedResults(results: SustainedResult[]): {
+  scalars: Omit<SustainedResult, 'heapTimeSeries'>[]
+  timeSeries: Array<{ name: string; heapTimeSeries: SustainedResult['heapTimeSeries'] }>
+} {
+  return {
+    scalars: results.map(stripSustainedArrays),
+    timeSeries: results.map((r) => ({ name: r.name, heapTimeSeries: r.heapTimeSeries })),
+  }
+}
 import { b1Scenarios } from './scenarios/b1-struct-creation.js'
 import { b2Scenarios } from './scenarios/b2-insert-remove-churn.js'
 import { b3Scenarios } from './scenarios/b3-iterate-mutate.js'
@@ -390,17 +443,31 @@ const task10Meta = {
   jitCountersAvailable,
 }
 
-// Write results.json with the new instrumentation fields
+// Write results.json (scalar-only) + raw-timeseries.json (bulk arrays) for task-10.
+// heapTimeSeries arrays are stripped from results.json to keep committed diffs small.
+// The companion raw-timeseries.json is gitignored (see .gitignore).
 const task10ResultsPath = `${task10ReportDir}/results.json`
+
+const { scalars: b8Scalars, timeSeries: b8TimeSeries } = splitSustainedResults(b8Results)
+const { scalars: b9Scalars, timeSeries: b9TimeSeries } = splitSustainedResults(b9Results)
+
 const task10Payload = {
-  meta: task10Meta,
+  meta: {
+    ...task10Meta,
+    rawTimeseriesPath: './raw-timeseries.json',
+  },
   oneShot: results,
   sustained: {
-    b8: b8Results,
-    b9: b9Results,
+    b8: b8Scalars,
+    b9: b9Scalars,
   },
 }
-await Bun.write(task10ResultsPath, JSON.stringify(task10Payload, null, 2))
+const task10TimeseriesPayload = {
+  meta: { date: task10Meta.date, description: 'heapTimeSeries arrays stripped from results.json' },
+  b8: b8TimeSeries,
+  b9: b9TimeSeries,
+}
+await writeReportSplit(task10ReportDir, task10Payload, task10TimeseriesPayload)
 console.log(`\nTask-10 results written to ${task10ResultsPath}`)
 
 // ---------------------------------------------------------------------------
@@ -780,5 +847,48 @@ Machine-readable data: \`results.json\`
 const task10BenchmarkPath = `${task10ReportDir}/benchmark.md`
 await Bun.write(task10BenchmarkPath, task10BenchmarkMd)
 console.log(`Task-10 report written to ${task10BenchmarkPath}\n`)
+
+// ---------------------------------------------------------------------------
+// Milestone-3 task-3 report — raw bench output for task-4 consumption
+// ---------------------------------------------------------------------------
+// Write to a NEW milestone-3 directory so it does not overwrite any milestone-2
+// historical artifacts. The strict constraint: `git diff .chief/milestone-2/`
+// must remain empty after task-3.
+// ---------------------------------------------------------------------------
+
+const task3ReportDir = '.chief/milestone-3/_report/task-3'
+await mkdir(task3ReportDir, { recursive: true })
+
+const task3Meta = {
+  bunVersion: Bun.version,
+  platform: process.platform,
+  arch: process.arch,
+  date: new Date().toISOString(),
+  jitCountersAvailable,
+  rawTimeseriesPath: './raw-timeseries.json',
+}
+
+// Build scalar-only results for committed results.json
+const { scalars: task3B8Scalars, timeSeries: task3B8TimeSeries } = splitSustainedResults(b8Results)
+const { scalars: task3B9Scalars, timeSeries: task3B9TimeSeries } = splitSustainedResults(b9Results)
+
+const task3Payload = {
+  meta: task3Meta,
+  oneShot: results,
+  sustained: {
+    b8: task3B8Scalars,
+    b9: task3B9Scalars,
+  },
+}
+
+const task3TimeseriesPayload = {
+  meta: { date: task3Meta.date, description: 'heapTimeSeries arrays stripped from results.json' },
+  b8: task3B8TimeSeries,
+  b9: task3B9TimeSeries,
+}
+
+await writeReportSplit(task3ReportDir, task3Payload, task3TimeseriesPayload)
+console.log(`Milestone-3 task-3 results written to ${task3ReportDir}/results.json`)
+console.log(`(raw-timeseries.json written alongside — gitignored)\n`)
 
 process.exit(0)

@@ -3,8 +3,7 @@
     "bunVersion": "1.3.8",
     "platform": "darwin",
     "arch": "arm64",
-    "date": "2026-04-12T03:53:00.850Z",
-    "xlEnabled": false,
+    "date": "2026-04-12T03:53:00.854Z",
     "jitCountersAvailable": [
       "numberOfDFGCompiles",
       "totalCompileTime"

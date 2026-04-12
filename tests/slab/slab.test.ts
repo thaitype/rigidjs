@@ -63,11 +63,11 @@ describe('slab — construction', () => {
     expect(() => slab(Vec3, NaN)).toThrow('slab: capacity must be a positive integer')
   })
 
-  it('slab throws if def has no _Handle', () => {
-    // Construct a fake StructDef without _Handle
+  it('slab throws if def has no _columnLayout', () => {
+    // Construct a fake StructDef without _columnLayout
     const fakeDef = { sizeof: 8, fields: { x: 'f64' as NumericType } }
     expect(() => slab(fakeDef as any, 4)).toThrow(
-      'slab: StructDef has no _Handle — was it created by struct()?',
+      'slab: StructDef has no _columnLayout — was it created by struct()?',
     )
   })
 })
@@ -543,15 +543,17 @@ describe('slab — nested struct (Particle)', () => {
     expect((s.get(2) as any).id).toBe(300)
   })
 
-  it('slot 1 pos.x is at raw byte offset 56 in the DataView', () => {
+  it('slot 1 pos.x is readable via slab.column("pos.x")[1] (SoA layout)', () => {
+    // In SoA layout with capacity=100, pos.x column starts at byte 0 (byteOffset=0 * 100).
+    // Element 1 of Float64Array is at byte index 1 (byte offset 8 from column start).
     const s = slab(Particle, 100)
     s.insert() // slot 0
     const h1 = s.insert() as any
     h1.pos.x = 99.5
 
-    // Slot 1 starts at byte 56 (sizeof=56). pos.x is at offset 0 within the slot.
-    const view = new DataView(s.buffer)
-    expect(view.getFloat64(56, true)).toBe(99.5)
+    // Verify via slab.column() — the SoA way to access raw column data
+    const posX = (s as any).column('pos.x') as Float64Array
+    expect(posX[1]).toBe(99.5)
   })
 })
 
