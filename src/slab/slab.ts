@@ -181,10 +181,14 @@ export function slab<F extends StructFields>(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SoAHandleConstructor returns `object`; any isolates the bridge
   const _handle = new (HandleClass as any)(0) as Handle<F>
 
-  // --- Bitmap + free-list (unchanged from AoS path) ---
+  // --- Bitmap + free-list ---
+  // Pre-allocated Uint32Array stack: avoids JS Array push/pop GC overhead.
+  // Fill descending so freeList[capacity-1] = 0, freeList[capacity-2] = 1, ...
+  // _freeTop starts at capacity; --_freeTop before read gives slot 0 first.
   const _bits = new Uint8Array(bitmapByteLength(capacity))
-  const _freeList: number[] = []
-  for (let i = capacity - 1; i >= 0; i--) _freeList.push(i)
+  let _freeList: Uint32Array | null = new Uint32Array(capacity)
+  let _freeTop = capacity
+  for (let i = 0; i < capacity; i++) _freeList[i] = capacity - 1 - i
 
   let _len = 0
   let _dropped = false
@@ -201,8 +205,9 @@ export function slab<F extends StructFields>(
   return {
     insert(): Handle<F> {
       assertLive()
-      const slot = _freeList.pop()
-      if (slot === undefined) throw new Error('slab at capacity')
+      if (_freeTop === 0) throw new Error('slab at capacity')
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- bounds-checked: _freeTop > 0 and _freeList is live
+      const slot = _freeList![--_freeTop]!
       bitmapSet(_bits, slot)
       _len++
       // SoA _rebase takes only (slot) — no DataView, no byte offset.
@@ -220,7 +225,7 @@ export function slab<F extends StructFields>(
         throw new Error(`slot ${slot} already free`)
       }
       bitmapClear(_bits, slot)
-      _freeList.push(slot)
+      _freeList![_freeTop++] = slot
       _len--
     },
 
@@ -256,8 +261,8 @@ export function slab<F extends StructFields>(
     clear(): void {
       assertLive()
       _bits.fill(0)
-      _freeList.length = 0
-      for (let i = capacity - 1; i >= 0; i--) _freeList.push(i)
+      _freeTop = capacity
+      for (let i = 0; i < capacity; i++) _freeList![i] = capacity - 1 - i
       _len = 0
     },
 
@@ -265,9 +270,7 @@ export function slab<F extends StructFields>(
       assertLive()
       _dropped = true
       // Null out internal references so GC can reclaim them.
-      // `any` casts are required to assign null to typed variables after drop.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(this as any)._buf = null
+      _freeList = null
     },
 
     get buffer(): ArrayBuffer {
