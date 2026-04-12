@@ -9,3 +9,4 @@
 - [x] task-7: Performance benchmark suite (B1/B2/B3/B7) comparing plain JS vs RigidJS
 - [x] task-8: Fix allocation-pressure measurement flaw in B1/B7 (add one-shot `allocate()` phase to harness)
 - [x] task-9: Sustained-load benchmarks B8 (time-budget churn) and B9 (heap-scaling curve) to test GC-pressure thesis under p99 tail latency
+- [x] task-10: Benchmark instrumentation extensions — CPU usage (`process.cpuUsage`), JIT recompile counters (`bun:jsc`), high-water RSS, per-tick heap time-series + ASCII sparklines for B8; writes new report to `_report/task-10/` without touching task-7/task-9 reports
