@@ -86,6 +86,21 @@ export interface Slab<F extends StructFields> {
    * @throws "slab has been dropped" after drop().
    */
   column<K extends ColumnKey<F>>(name: K): ColumnType<F, K>
+
+  /**
+   * Iterate over all occupied slots, calling `cb` with the shared handle
+   * rebased to each occupied slot and the slot number.
+   *
+   * Internal counted loop — no iterator protocol overhead.
+   * The same handle instance is passed to every invocation; do NOT store
+   * references to it past the current callback invocation.
+   *
+   * Unoccupied slots (holes in the free-list) are skipped automatically.
+   * No early-exit support — forEach always runs to completion.
+   *
+   * @throws "slab has been dropped" after drop().
+   */
+  forEach(cb: (handle: Handle<F>, slot: number) => void): void
 }
 
 // ---------------------------------------------------------------------------
@@ -288,6 +303,18 @@ export function slab<F extends StructFields>(
       // numeric token at slab construction time and is guaranteed to match ColumnType<F, K>
       // by the layout invariants established in task-2 (see computeColumnLayout).
       return arr as unknown as ColumnType<F, K>
+    },
+
+    forEach(cb: (handle: Handle<F>, slot: number) => void): void {
+      assertLive()
+      // Internal counted loop — no iterator protocol, no per-call allocation.
+      // Reuses the single shared handle instance by rebasing it to each occupied slot.
+      for (let i = 0; i < capacity; i++) {
+        if (!bitmapGet(_bits, i)) continue
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated and not in static TS type
+        ;((_handle as any)._rebase(i))
+        cb(_handle, i)
+      }
     },
   }
 }

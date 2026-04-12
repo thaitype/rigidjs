@@ -582,3 +582,101 @@ describe('type annotation usability', () => {
     expect(h).toBeDefined()
   })
 })
+
+// ---------------------------------------------------------------------------
+// forEach()
+// ---------------------------------------------------------------------------
+
+describe('slab — forEach()', () => {
+  it('forEach visits all occupied slots (dense slab)', () => {
+    const s = slab(Vec3, 5)
+    const h0 = s.insert() as any; h0.x = 10; h0.y = 20; h0.z = 30
+    const h1 = s.insert() as any; h1.x = 40; h1.y = 50; h1.z = 60
+    const h2 = s.insert() as any; h2.x = 70; h2.y = 80; h2.z = 90
+
+    const visited: number[] = []
+    const xValues: number[] = []
+    s.forEach((h, slot) => {
+      visited.push(slot)
+      xValues.push((h as any).x)
+    })
+
+    expect(visited).toEqual([0, 1, 2])
+    expect(xValues).toEqual([10, 40, 70])
+  })
+
+  it('forEach skips removed (free) slots', () => {
+    const s = slab(Vec3, 5)
+    const h0 = s.insert() as any; h0.x = 1
+    const h1 = s.insert() as any; h1.x = 2
+    const h2 = s.insert() as any; h2.x = 3
+    s.remove(1) // free slot 1
+
+    const visited: number[] = []
+    const xValues: number[] = []
+    s.forEach((h, slot) => {
+      visited.push(slot)
+      xValues.push((h as any).x)
+    })
+
+    expect(visited).toEqual([0, 2])
+    expect(xValues).toEqual([1, 3])
+  })
+
+  it('forEach receives the correct slot number for each occupied slot', () => {
+    const s = slab(Vec3, 10)
+    s.insert() // slot 0
+    s.insert() // slot 1
+    s.insert() // slot 2
+    s.insert() // slot 3
+    s.remove(2) // free slot 2, remaining: 0, 1, 3
+
+    const slots: number[] = []
+    s.forEach((_h, slot) => { slots.push(slot) })
+
+    expect(slots).toEqual([0, 1, 3])
+  })
+
+  it('forEach with empty slab calls cb zero times', () => {
+    const s = slab(Vec3, 5)
+    let count = 0
+    s.forEach(() => { count++ })
+    expect(count).toBe(0)
+  })
+
+  it('forEach allows mutation of visited elements', () => {
+    const s = slab(Vec3, 3)
+    const h0 = s.insert() as any; h0.x = 1
+    const h1 = s.insert() as any; h1.x = 2
+    const h2 = s.insert() as any; h2.x = 3
+
+    s.forEach((h) => {
+      (h as any).x += 100
+    })
+
+    expect((s.get(0) as any).x).toBe(101)
+    expect((s.get(1) as any).x).toBe(102)
+    expect((s.get(2) as any).x).toBe(103)
+  })
+
+  it('forEach reuses the same handle instance for every slot', () => {
+    const s = slab(Vec3, 3)
+    s.insert()
+    s.insert()
+    s.insert()
+
+    const seen: object[] = []
+    s.forEach((h) => { seen.push(h) })
+
+    // All three are the same handle instance (reference equality).
+    expect(seen[0] === seen[1]).toBe(true)
+    expect(seen[1] === seen[2]).toBe(true)
+  })
+
+  it('forEach after drop() throws "slab has been dropped"', () => {
+    const s = slab(Vec3, 3)
+    s.insert()
+    s.drop()
+    expect(() => s.forEach(() => {})).toThrow('slab has been dropped')
+  })
+})

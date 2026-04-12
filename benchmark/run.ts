@@ -76,6 +76,8 @@ const SCENARIOS: ScenarioEntry[] = [
   { kind: 'oneshot', name: 'B3-vec-column',     file: './scenarios/b3-vec-column.ts',          export: 'b3VecColumnScenarios'  },
   { kind: 'oneshot', name: 'B3-partial',        file: './scenarios/b3-partial.ts',             export: 'b3PartialScenarios'    },
   { kind: 'oneshot', name: 'B3-vec-get',        file: './scenarios/b3-vec-get.ts',             export: 'b3VecGetScenarios'     },
+  { kind: 'oneshot', name: 'B3-vec-forEach',    file: './scenarios/b3-vec-forEach.ts',         export: 'b3VecForEachScenarios' },
+  { kind: 'oneshot', name: 'B3-slab-forEach',   file: './scenarios/b3-slab-forEach.ts',        export: 'b3SlabForEachScenarios'},
   // Sustained / scaling
   { kind: 'sustained', name: 'B8-sustained',    file: './scenarios/b8-sustained-churn.ts',     export: 'b8Scenarios'           },
   { kind: 'scaling',   name: 'B9-scaling',      file: './scenarios/b9-heap-scaling.ts'                                         },

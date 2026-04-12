@@ -153,6 +153,35 @@ export interface Vec<F extends StructFields> {
    * @throws "vec has been dropped" on first call to next() after drop().
    */
   [Symbol.iterator](): Iterator<Handle<F>>
+
+  /**
+   * Iterate over all elements from index 0 to len-1, calling `cb` with
+   * the shared handle rebased to each index and the index number.
+   *
+   * Internal counted loop — no iterator protocol overhead.
+   * The same handle instance is passed to every invocation; do NOT store
+   * references to it past the current callback invocation.
+   *
+   * No early-exit support — forEach always runs to completion.
+   *
+   * @throws "vec has been dropped" after drop().
+   */
+  forEach(cb: (handle: Handle<F>, index: number) => void): void
+
+  /**
+   * Ensure the vec has capacity for at least `n` total elements.
+   *
+   * If the current capacity >= n, this is a no-op.
+   * If the current capacity < n, the backing buffer is reallocated to
+   * exactly `n` capacity (same growth mechanism as push overflow, but
+   * targeting `n` instead of 2x). All existing elements are preserved.
+   * Previously returned column() references become stale after growth.
+   *
+   * @param n - Target minimum capacity. Must be a positive integer.
+   * @throws "vec has been dropped" after drop().
+   * @throws "vec.reserve: n must be a positive integer" for invalid input.
+   */
+  reserve(n: number): void
 }
 
 // ---------------------------------------------------------------------------
@@ -424,6 +453,51 @@ export function vec<F extends StructFields>(
           return { value: undefined as unknown as Handle<F>, done: true }
         },
       }
+    },
+
+    forEach(cb: (handle: Handle<F>, index: number) => void): void {
+      assertLive()
+      // Internal counted loop — no iterator protocol, no per-call allocation.
+      // Reuses the single shared handle instance by rebasing it to each index.
+      for (let i = 0; i < _len; i++) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated and not in static TS type
+        ;((_handle as any)._rebase(i))
+        cb(_handle, i)
+      }
+    },
+
+    reserve(n: number): void {
+      assertLive()
+      if (!Number.isInteger(n) || n <= 0) {
+        throw new Error('vec.reserve: n must be a positive integer')
+      }
+      // No-op if already large enough.
+      if (_capacity >= n) return
+
+      // Grow to exactly n.
+      const newBuf = new ArrayBuffer(layout.sizeofPerSlot * n)
+
+      // Snapshot old columns before rebuilding.
+      const oldColumnMap = _columnMap
+
+      // Build new columns over the new buffer.
+      buildColumns(newBuf, n)
+
+      // Copy existing data from old columns to new columns.
+      for (const col of layout.columns) {
+        const oldArr = oldColumnMap.get(col.name)!
+        const newArr = _columnMap.get(col.name)!
+        newArr.set(oldArr)
+      }
+
+      // Update internal state.
+      _buf = newBuf
+      _capacity = n
+
+      // Re-create handle with new column refs (Strategy A).
+      HandleClass = generateSoAHandleClass(layout.handleTree, columnRefs)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      _handle = new (HandleClass as any)(0) as Handle<F>
     },
   }
 }
