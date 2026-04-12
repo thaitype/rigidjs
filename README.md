@@ -84,7 +84,7 @@ p.life = 1.0
 p.id = 42
 ```
 
-`insert()` does not allocate a new object. It returns the **same shared handle instance** every call, rebased to the new slot. Field writes go straight through a `DataView` into the backing buffer.
+`insert()` does not allocate a new object. It returns the **same shared handle instance** every call, rebased to the new slot. Field writes go straight through monomorphic TypedArray indexed access into the backing buffer.
 
 ### 3. Iterate and remove
 
@@ -110,6 +110,23 @@ particles.drop()
 
 That is the whole mental model. Everything else is details.
 
+### 4. Column access for hot loops
+
+For maximum throughput in tight inner loops, bypass the handle entirely and work with raw TypedArray columns:
+
+```ts
+const posX = particles.column('pos.x')   // Float64Array view into the buffer
+const velX = particles.column('vel.x')   // Float64Array view into the buffer
+
+for (let i = 0; i < particles.len; i++) {
+  posX[i] += velX[i] * dt
+}
+```
+
+Zero handle overhead. Pure `Float64Array[i]` — the JIT compiles this to a single indexed memory load. On 100k entities, column access runs **2.7x faster than equivalent plain JS** code.
+
+The column reference is resolved once (allocation-free on every call — the view is pre-built at slab creation) and the hot loop touches nothing but the two Float64Arrays. This is the "maximum speed" tier.
+
 ---
 
 ## Mental model
@@ -127,7 +144,6 @@ const Point = struct({
   hp: 'u8',    // 1 byte
 })
 // sizeof(Point) = 4 + 4 + 1 = 9 bytes
-// Declaration order. No padding. No reordering.
 ```
 
 Now allocate storage for three of them:
@@ -136,26 +152,27 @@ Now allocate storage for three of them:
 const points = slab(Point, 3)
 ```
 
-This allocates **one** `ArrayBuffer` of `9 × 3 = 27` bytes. That's it. Here is the memory, byte by byte:
+This allocates **one** `ArrayBuffer` with each field stored as a contiguous column — all `x` values together, all `y` values together, all `hp` values together:
 
 ```
-byte:  0     4     8  9     13    17 18    22    26
-       +-----+-----+--+-----+-----+--+-----+-----+--+
-       |  x  |  y  |hp|  x  |  y  |hp|  x  |  y  |hp|
-       | f32 | f32 |u8| f32 | f32 |u8| f32 | f32 |u8|
-       +-----+-----+--+-----+-----+--+-----+-----+--+
-       |<-- slot 0 -->|<-- slot 1 -->|<-- slot 2 -->|
+ArrayBuffer (27 bytes)
+┌───────────────┬───────────────┬─────────┐
+│  x column     │  y column     │hp column│
+│  Float32Array │  Float32Array │Uint8Arr │
+│ [x₀, x₁, x₂] │ [y₀, y₁, y₂] │[h₀,h₁,h₂]│
+│  12 bytes     │  12 bytes     │ 3 bytes │
+└───────────────┴───────────────┴─────────┘
 ```
 
-Three slots, side by side, contiguous. No pointers between them. No wrapper objects. Reading a field is plain arithmetic:
+Each column is a TypedArray **view** into slices of the same underlying buffer. Reading a field is a single indexed TypedArray access:
 
 ```
-points.get(i).x   =>  DataView.getFloat32(i * 9 + 0)
-points.get(i).y   =>  DataView.getFloat32(i * 9 + 4)
-points.get(i).hp  =>  DataView.getUint8  (i * 9 + 8)
+points.get(i).x   =>  Float32Array[i]   // one indexed load, JIT-inlineable
+points.get(i).y   =>  Float32Array[i]
+points.get(i).hp  =>  Uint8Array[i]
 ```
 
-The handle is a tiny accessor class code-generated at `struct()` call time. It does exactly the math above and nothing else — no hash lookups, no hidden classes, no pointer chasing.
+The handle is a tiny accessor class code-generated at `struct()` call time. Each getter captures its specific TypedArray directly — monomorphic, no polymorphic dispatch, no DataView overhead.
 
 **Now compare what the GC sees:**
 
@@ -163,18 +180,18 @@ The handle is a tiny accessor class code-generated at `struct()` call time. It d
 Plain JS array-of-objects:           RigidJS slab:
 
   [Array]  <-- heap                    [ArrayBuffer, 27 bytes]  <-- heap
-     |
-     +--> {x,y,hp}  <-- heap            (no child objects,
-     +--> {x,y,hp}  <-- heap             no pointers inside,
-     +--> {x,y,hp}  <-- heap             one allocation total)
+     |                                    + 3 TypedArray views (x, y, hp)
+     +--> {x,y,hp}  <-- heap
+     +--> {x,y,hp}  <-- heap            (3 views + 1 buffer = 4 objects,
+     +--> {x,y,hp}  <-- heap             regardless of entity count)
 
-  GC tracks: 4 objects                 GC tracks: 1 object
-  Memory:    fragmented                Memory:    contiguous
-  Field:     property lookup           Field:     byte-offset math
+  GC tracks: 4 objects                 GC tracks: 4 objects
+  Memory:    fragmented                Memory:    contiguous columns
+  Field:     property lookup           Field:     TypedArray[i]
   Growth:    N objects per insert      Growth:    zero allocs per insert
 ```
 
-Scale this up to 10,000 particles and the difference goes from "trivia" to "the whole point of the library." Plain JS: 10,001 heap objects, each with a hidden class, scattered across memory, all tracked by the GC. RigidJS: one `ArrayBuffer`, 90,000 bytes, one thing for the GC to look at.
+At 3 entities, the GC counts are similar. Scale to 100,000 particles and the difference becomes the whole point: plain JS creates 100,001 heap objects (array + N entity objects), each with a hidden class, scattered across memory. RigidJS: one `ArrayBuffer` + a handful of TypedArray views + bookkeeping — measured at ~368 GC-tracked objects total, regardless of entity count.
 
 ### Blueprint vs container
 
@@ -203,47 +220,40 @@ The particle example is the best single file to read next. It demonstrates every
 
 ## Benchmarks
 
-The elevator-pitch question is "is it actually faster?" The honest answer is: **on mean throughput, no — plain JS wins.** RigidJS is not here to win ops/sec contests. Where it wins is **GC pressure** and **tail latency under sustained load**, and the numbers below are measured, not marketing.
+Single machine (Apple Silicon, Bun 1.3.8), one run, no statistical significance claims. Treat the shape of the numbers more than the digits.
 
-### What milestone-2 observed
+### Iteration throughput — the headline result
 
-Single machine (Apple Silicon, Macbook Pro M4, Bun 1.3.8), one run, no statistical significance claims. Treat the shape of the numbers more than the digits.
+| Scenario (100k entities) | Plain JS | RigidJS handle | RigidJS column |
+|---|---:|---:|---:|
+| B3 iterate + mutate `pos.x += vel.x` | 5,291 ops/s | **4,663 ops/s** (0.88x) | **14,244 ops/s** (2.69x) |
 
-**GC pressure — objects the collector must track per container**
+The handle API is within 12% of plain JS. The column API — resolving `slab.column('pos.x')` once and looping over the raw `Float64Array` — runs **2.7x faster than plain JS**. This is the payoff of the Structure-of-Arrays layout: iterating one field across all entities hits sequential cache lines.
+
+### GC pressure — objects the collector must track per container
 
 | Scenario | Plain JS | RigidJS | Advantage |
 |---|---:|---:|---:|
-| 100k `Vec3` | 100,106 | **315** | ~318× fewer |
-| 50k nested `Particle` | 150,092 | **491** | ~306× fewer |
-| 50k flat `Particle` | 50,096 | **491** | ~102× fewer |
+| 100k `Vec3` | 100,106 | **368** | ~272x fewer |
+| 50k nested `Particle` | 150,092 | **791** | ~190x fewer |
 
-Two orders of magnitude fewer objects for the GC to scan and free. This is the core value proposition.
+Two orders of magnitude fewer objects for the GC to scan and free.
 
-**Sustained load — 10 seconds of 1k insert + 1k remove + full iterate per tick at 100k capacity**
+### Sustained load — 10s of 1k insert + 1k remove + full iterate per tick at 100k capacity
 
 | Metric | Plain JS | RigidJS | Result |
 |---|---:|---:|---:|
-| Mean tick | 0.193 ms | 0.183 ms | RigidJS ~5% faster |
-| p99 tick | 0.452 ms | 0.343 ms | RigidJS 1.32× |
-| p999 tick | 0.929 ms | 0.635 ms | RigidJS 1.46× |
-| **Max tick** | **18.31 ms** | **5.79 ms** | **RigidJS 3.2×** |
+| Mean tick | 0.187 ms | 0.184 ms | Parity |
+| p99 tick | 0.814 ms | **0.300 ms** | RigidJS 2.7x better |
+| p999 tick | 2.662 ms | **0.560 ms** | RigidJS 4.8x better |
+| **Max tick** | **52.82 ms** | **5.99 ms** | **RigidJS 8.8x better** |
 
-The 18 ms max tick for plain JS is the GC spike. RigidJS's worst tick is a third of that. **Flatter tail, more predictable latency.**
+The 53 ms max tick for plain JS is a GC spike — it would drop 3 frames in a 60fps game loop. RigidJS's worst tick is 6 ms.
 
-**Scaling — max tick per capacity**
+### Where RigidJS loses (honest)
 
-| Capacity | Plain JS max | RigidJS max | Advantage |
-|---:|---:|---:|---:|
-| 10k | 3.85 ms | **0.13 ms** | 30× flatter |
-| 100k | 1.93 ms | **0.99 ms** | 2× flatter |
-| 1M | 7.10 ms | **5.56 ms** | 1.3× flatter |
-
-RigidJS has a flatter tail at every tested capacity — even at 10k, where plain JS wins on raw mean throughput by roughly 2×.
-
-### Where RigidJS loses
-
-- **Mean throughput on one-shot workloads.** Plain JS is consistently faster when the task is "grind numbers and exit." DataView dispatch has real per-op cost.
-- **Small-capacity RSS.** At 10k capacity, RigidJS uses ~524 MB vs plain JS ~134 MB because the slab's fixed bookkeeping dominates when there's nothing to amortize. This inverts near 1M (JS ~620 MB, RigidJS ~454 MB).
+- **Entity creation throughput.** `slab.insert()` with field writes is ~0.26x of plain JS object literal creation (B1, B7). If your workload is dominated by creating new entities rather than iterating existing ones, plain JS is faster.
+- **Small-capacity RSS.** At 10k capacity, RigidJS pre-allocates the full buffer upfront, which can use more memory than needed. At 1M capacity the relationship inverts (JS ~642 MB, RigidJS ~462 MB).
 - **Small capacities, workloads without latency SLAs, short-lived scripts.** Use plain JS. Seriously.
 
 ### Run it yourself
@@ -252,12 +262,13 @@ RigidJS has a flatter tail at every tested capacity — even at 10k, where plain
 bun run bench
 ```
 
-The harness lives in `benchmark/` and covers struct creation, insert/remove churn, iteration, nested field access, and sustained-load scaling. Full writeups and raw results are under [`.chief/milestone-2/_report/`](.chief/milestone-2/_report/) — in particular [`milestone-2-summary.md`](.chief/milestone-2/_report/milestone-2-summary.md) for the narrative and [`task-9/benchmark.md`](.chief/milestone-2/_report/task-9/benchmark.md) for the sustained-load tables.
+The harness lives in `benchmark/` and covers struct creation, insert/remove churn, iteration (handle + column), nested field access, sustained-load churn, and heap-scaling curves. Full writeups are under [`.chief/milestone-3/_report/`](.chief/milestone-3/_report/) — in particular [`milestone-3-summary.md`](.chief/milestone-3/_report/milestone-3-summary.md) for the narrative and [`task-4/benchmark.md`](.chief/milestone-3/_report/task-4/benchmark.md) for the complete comparison tables.
 
-**The honest pitch is not "RigidJS is faster than JS." It is:**
-1. Two orders of magnitude less GC pressure, measured.
-2. Flatter tail latency under sustained load, measured.
-3. Predictable worst-case ticks, measured.
+**The honest pitch:**
+1. **2.7x faster iteration** via column access on 100k entities, measured.
+2. **Two orders of magnitude less GC pressure**, measured.
+3. **8.8x flatter tail latency** under sustained load, measured.
+4. **Creation is slower** — 0.26x plain JS. Honest about the trade-off.
 
 ---
 
@@ -268,7 +279,9 @@ Rough status at the time of writing. Anything unchecked is subject to redesign.
 - [x] `struct()` — blueprint, field layout, nested structs, handle codegen
 - [x] `slab()` — fixed-capacity container, insert, remove, has, get, clear, drop
 - [x] Handle reuse invariant and `handle.slot` getter
-- [x] Benchmark harness
+- [x] SoA layout rewrite — single-buffer Structure-of-Arrays with monomorphic TypedArray codegen
+- [x] `slab.column(name)` — typed column access for maximum throughput in hot loops
+- [x] Benchmark harness with CPU, JIT counter, and heap time-series instrumentation
 - [ ] `slab.iter()` — lazy iteration with borrow protection
 - [ ] `slab.insert({...})` — atomic object-literal insertion with validation
 - [ ] `vec()` — growable, ordered container
