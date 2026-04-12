@@ -68,3 +68,84 @@ export const NUMERIC_SIZES: Record<NumericType, number> = {
   i16: 2,
   i8:  1,
 }
+
+// ---------------------------------------------------------------------------
+// SoA column type helpers (milestone-3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Internal helper: maps a NumericType token to its concrete TypedArray subclass type.
+ * Not exported — used internally by ColumnType<F, K>.
+ */
+type TypedArrayFor<T extends NumericType> =
+  T extends 'f64' ? Float64Array :
+  T extends 'f32' ? Float32Array :
+  T extends 'u32' ? Uint32Array :
+  T extends 'u16' ? Uint16Array :
+  T extends 'u8'  ? Uint8Array :
+  T extends 'i32' ? Int32Array :
+  T extends 'i16' ? Int16Array :
+  T extends 'i8'  ? Int8Array :
+  never
+
+/**
+ * Internal helper: given a struct field map F and a dotted key string K,
+ * resolves to the NumericType of the leaf field. Walks one level of nesting
+ * for keys of the form `'outer.inner'`.
+ * Not exported — used internally by ColumnType<F, K>.
+ */
+type ResolveLeafToken<F extends StructFields, K extends string> =
+  K extends `${infer Head}.${infer Tail}`
+    ? Head extends keyof F
+      ? F[Head] extends StructDef<infer G>
+        ? ResolveLeafToken<G, Tail>
+        : never
+      : never
+    : K extends keyof F
+      ? F[K] extends NumericType
+        ? F[K]
+        : never
+      : never
+
+/**
+ * Flattened dotted-key union of all columns reachable from a struct field map.
+ * Top-level numeric fields contribute their own key.
+ * Nested StructDef fields contribute `'<outer>.<inner>'` for every reachable
+ * leaf in the nested struct, recursively.
+ *
+ * Example:
+ *   type V3 = { x: 'f64'; y: 'f64'; z: 'f64' }
+ *   type P  = { pos: StructDef<V3>; vel: StructDef<V3>; life: 'f32'; id: 'u32' }
+ *   // ColumnKey<P> === 'pos.x' | 'pos.y' | 'pos.z' | 'vel.x' | 'vel.y' | 'vel.z' | 'life' | 'id'
+ */
+export type ColumnKey<F extends StructFields> = {
+  [K in keyof F & string]:
+    F[K] extends NumericType
+      ? K
+      : F[K] extends StructDef<infer G>
+        ? `${K}.${ColumnKey<G> & string}`
+        : never
+}[keyof F & string]
+
+/**
+ * Given a struct field map F and a flattened column key K, resolves to the
+ * concrete TypedArray subclass that backs that column.
+ *
+ *   'f64' → Float64Array
+ *   'f32' → Float32Array
+ *   'u32' → Uint32Array
+ *   'u16' → Uint16Array
+ *   'u8'  → Uint8Array
+ *   'i32' → Int32Array
+ *   'i16' → Int16Array
+ *   'i8'  → Int8Array
+ *
+ * Example:
+ *   ColumnType<P, 'pos.x'>  → Float64Array
+ *   ColumnType<P, 'life'>   → Float32Array
+ *   ColumnType<P, 'id'>     → Uint32Array
+ */
+export type ColumnType<
+  F extends StructFields,
+  K extends ColumnKey<F>,
+> = TypedArrayFor<ResolveLeafToken<F, K> & NumericType>
