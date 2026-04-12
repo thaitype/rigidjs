@@ -132,7 +132,7 @@ This measures recompiles of the wrapper closure — a direct signal of "did the 
 
 **What's still valid in task-10 despite this bug.** CPU totals, high-water RSS, heap time-series sparklines, and per-tick latency percentiles are all unaffected by the JIT counter bug and remain trustworthy evidence.
 
-**Status.** Deferred — not blocking milestone-2 completion. Will be addressed in a follow-up task (tentatively task-11) before milestone-3 starts, OR in parallel with milestone-3 work as bandwidth allows.
+**Status.** Fixed in milestone-3 task-1 (see `.chief/milestone-3/_plan/task-1.md`). The corrected harness passes `scenario.fn` / `scenario.tick` as the function argument to `numberOfDFGCompiles()`, `benchmark/probe-jsc.ts` now has a two-phase probe (zero-arg + function-arg), and `totalCompileTime()` delta sampling was added as a process-global secondary signal. The task-10 report was regenerated with real JIT data.
 
 ## Deliverables landed
 

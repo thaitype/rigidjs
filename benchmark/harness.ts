@@ -3,19 +3,43 @@ import { heapStats } from 'bun:jsc'
 // Cast jsc through Record<string,unknown> once to satisfy verbatimModuleSyntax + strict mode
 // without `any` — the dynamic property access below requires this escape hatch.
 import * as jsc from 'bun:jsc'
-const _jscMap = jsc as Record<string, unknown>
+const _jscMap = jsc as unknown as Record<string, unknown>
 
 // ---------------------------------------------------------------------------
-// JIT counter probes — resolved at module load. Any counter absent on this
-// Bun version is null.  Probe step (task-10 §3) showed that numberOfDFGCompiles
-// exists in Object.keys(jsc) on Bun 1.3.8 but returns undefined, not a number.
-// We guard for typeof === 'function' AND a numeric return value before keeping.
+// JIT counter probes — resolved at module load.
+//
+// IMPORTANT: numberOfDFGCompiles and sibling function-argument counters have
+// the signature (fn: Function) => number, NOT () => number. Calling them with
+// zero arguments returns undefined, which looks like "counter unavailable" but
+// is actually a calling-convention bug. The original task-10 harness called
+// these with zero arguments and therefore always got null deltas.
+//
+// Correct usage (verified on Bun 1.3.8 darwin/arm64):
+//   const hot = (x: number) => x * x + x
+//   for (let i = 0; i < 1_000_000; i++) hot(i)   // warm into DFG tier
+//   numberOfDFGCompiles(hot)                       // → 1 (real number)
+//
+// Fix (milestone-3 task-1): probe function-arg counters by calling a warmed
+// throwaway function as argument. Sampling in bench() / benchSustained() passes
+// scenario.fn / scenario.tick as the function argument.
+//
+// BLIND SPOT: numberOfDFGCompiles(scenario.fn) measures recompiles of the
+// WRAPPER CLOSURE only. It does NOT capture recompiles of nested functions
+// called inside the wrapper — JSC tracks those separately per Function object.
+// totalCompileTime() delta is the process-global catch-all that covers nested
+// functions. Together, the two signals are the best available from userland
+// without JSC internals access.
 // ---------------------------------------------------------------------------
 
-function _probeCounter(name: string): (() => number) | null {
+type FnArgCounter = (fn: Function) => number
+
+/**
+ * Probe a zero-arg counter. Returns the function if it returns a finite number
+ * when called with no arguments; null otherwise.
+ */
+function _probeZeroArgCounter(name: string): (() => number) | null {
   const fn = _jscMap[name]
   if (typeof fn !== 'function') return null
-  // Call once to check if it returns a finite number on this Bun version
   try {
     const sample = (fn as () => unknown)()
     if (typeof sample === 'number' && isFinite(sample)) return fn as () => number
@@ -25,15 +49,45 @@ function _probeCounter(name: string): (() => number) | null {
   return null
 }
 
-const dfgCompilesFn: (() => number) | null = _probeCounter('numberOfDFGCompiles')
-const ftlCompilesFn: (() => number) | null = _probeCounter('numberOfFTLCompiles')
-const osrExitsFn: (() => number) | null = _probeCounter('numberOfOSRExits')
+/**
+ * Probe a function-argument counter. Creates a throwaway warmed function,
+ * calls the counter with it, and returns the counter function if the result
+ * is a finite number. Returns null if the counter is absent or returns
+ * undefined/non-number (which would indicate a truly unavailable counter,
+ * not the calling-convention bug from task-10).
+ */
+function _probeFunctionArgCounter(name: string): FnArgCounter | null {
+  const fn = _jscMap[name]
+  if (typeof fn !== 'function') return null
+  // Create a dedicated throwaway probe function and warm it past DFG threshold
+  const warmFn = (x: number): number => x * x + x
+  for (let i = 0; i < 1_000_000; i++) warmFn(i)
+  try {
+    const sample = (fn as FnArgCounter)(warmFn)
+    if (typeof sample === 'number' && isFinite(sample)) return fn as FnArgCounter
+  } catch {
+    // throws on this version — treat as unavailable
+  }
+  return null
+}
+
+// Function-argument counters (per-function JIT statistics)
+const dfgCompilesFn: FnArgCounter | null = _probeFunctionArgCounter('numberOfDFGCompiles')
+const ftlCompilesFn: FnArgCounter | null = _probeFunctionArgCounter('numberOfFTLCompiles')
+const osrExitsFn: FnArgCounter | null = _probeFunctionArgCounter('numberOfOSRExits')
+
+// Zero-arg counter: process-global total JSC compile time in milliseconds since process start.
+// This is a catch-all that covers ALL function compilations during the sampling window,
+// not just the scenario wrapper — making it complementary to the per-function dfgCompilesFn.
+const totalCompileTimeFn: (() => number) | null = _probeZeroArgCounter('totalCompileTime')
 
 // List of JIT counter names that are actually available on this Bun version
+// (fn-arg counters listed first, then zero-arg process-global counters)
 export const jitCountersAvailable: string[] = [
   dfgCompilesFn !== null ? 'numberOfDFGCompiles' : null,
   ftlCompilesFn !== null ? 'numberOfFTLCompiles' : null,
   osrExitsFn !== null ? 'numberOfOSRExits' : null,
+  totalCompileTimeFn !== null ? 'totalCompileTime' : null,
 ].filter((s): s is string => s !== null)
 
 // ---------------------------------------------------------------------------
@@ -80,6 +134,14 @@ export interface BenchResult {
   ftlCompilesDelta: number | null       // null when counter not present on this Bun version
   osrExitsDelta: number | null          // null when counter not present on this Bun version
   highWaterRssMB: number
+  // --- milestone-3 task-1 additions (appended only) ---
+  /**
+   * Process-global JSC compile time delta across the measurement window.
+   * Includes compiles of any function, not just scenario.fn.
+   * Zero or very small delta means the window was JIT-stable end to end.
+   * Complements dfgCompilesDelta (which only measures the wrapper closure).
+   */
+  totalCompileTimeMsDelta: number | null
 }
 
 export interface Scenario {
@@ -159,11 +221,15 @@ export async function bench(scenario: Scenario): Promise<BenchResult> {
 
   // 4. Warmup — let JSC JIT compile without timing
   // --- task-10: CPU / JIT bracket begins immediately BEFORE warmup ---
+  // NOTE (milestone-3 task-1 fix): dfgCompilesFn takes scenario.fn as argument —
+  // it measures recompiles of the wrapper closure specifically. totalCompileTimeFn
+  // is zero-arg and process-global (covers all functions compiled during the window).
   const cpuStart = process.cpuUsage()
   const jitStart = {
-    dfg: dfgCompilesFn !== null ? dfgCompilesFn() : null,
-    ftl: ftlCompilesFn !== null ? ftlCompilesFn() : null,
-    osrExits: osrExitsFn !== null ? osrExitsFn() : null,
+    dfg: dfgCompilesFn !== null ? dfgCompilesFn(scenario.fn) : null,
+    ftl: ftlCompilesFn !== null ? ftlCompilesFn(scenario.fn) : null,
+    osrExits: osrExitsFn !== null ? osrExitsFn(scenario.fn) : null,
+    totalCompileTimeMs: totalCompileTimeFn !== null ? totalCompileTimeFn() : null,
   }
 
   for (let i = 0; i < warmup; i++) scenario.fn()
@@ -208,11 +274,13 @@ export async function bench(scenario: Scenario): Promise<BenchResult> {
   const heapAfter = heapStats()
 
   // --- task-10: read CPU / JIT end deltas (bracket ends AFTER post-loop GC)
+  // NOTE (milestone-3 task-1 fix): pass scenario.fn as argument to fn-arg counters.
   const cpuEnd = process.cpuUsage(cpuStart)
   const jitEnd = {
-    dfg: dfgCompilesFn !== null ? dfgCompilesFn() : null,
-    ftl: ftlCompilesFn !== null ? ftlCompilesFn() : null,
-    osrExits: osrExitsFn !== null ? osrExitsFn() : null,
+    dfg: dfgCompilesFn !== null ? dfgCompilesFn(scenario.fn) : null,
+    ftl: ftlCompilesFn !== null ? ftlCompilesFn(scenario.fn) : null,
+    osrExits: osrExitsFn !== null ? osrExitsFn(scenario.fn) : null,
+    totalCompileTimeMs: totalCompileTimeFn !== null ? totalCompileTimeFn() : null,
   }
 
   // Final RSS sample for high-water max
@@ -239,6 +307,10 @@ export async function bench(scenario: Scenario): Promise<BenchResult> {
   const osrExitsDelta =
     jitEnd.osrExits !== null && jitStart.osrExits !== null
       ? jitEnd.osrExits - jitStart.osrExits
+      : null
+  const totalCompileTimeMsDelta =
+    jitEnd.totalCompileTimeMs !== null && jitStart.totalCompileTimeMs !== null
+      ? jitEnd.totalCompileTimeMs - jitStart.totalCompileTimeMs
       : null
 
   // Final RSS sample — taken at result-build time to match rssMB. Update high-water
@@ -268,6 +340,7 @@ export async function bench(scenario: Scenario): Promise<BenchResult> {
     ftlCompilesDelta,
     osrExitsDelta,
     highWaterRssMB,
+    totalCompileTimeMsDelta,
   }
 }
 
@@ -304,6 +377,7 @@ export function formatTable(results: BenchResult[]): string {
   const COL_CPU_MS = 10
   const COL_DFG = 7
   const COL_HW_RSS = 10
+  const COL_COMPILE_MS = 12
 
   function pad(s: string, n: number, right = false): string {
     return right ? s.padStart(n) : s.padEnd(n)
@@ -326,6 +400,7 @@ export function formatTable(results: BenchResult[]): string {
     pad('cpuMs', COL_CPU_MS, true),
     pad('dfgΔ', COL_DFG, true),
     pad('hwRssMB', COL_HW_RSS, true),
+    pad('totalCmpMs', COL_COMPILE_MS, true),
   ].join('  ')
 
   const sep = '-'.repeat(header.length)
@@ -344,6 +419,7 @@ export function formatTable(results: BenchResult[]): string {
       pad((r.cpuTotalUs / 1000).toFixed(1), COL_CPU_MS, true),
       pad(fmtNullable(r.dfgCompilesDelta), COL_DFG, true),
       pad(r.highWaterRssMB.toFixed(2), COL_HW_RSS, true),
+      pad(r.totalCompileTimeMsDelta !== null ? r.totalCompileTimeMsDelta.toFixed(1) : '-', COL_COMPILE_MS, true),
     ].join('  '),
   )
 
@@ -407,6 +483,14 @@ export interface SustainedResult {
   highWaterRssMB: number
   /** Per-tick heap time-series (sampled every Nth tick, capped at 500 entries). */
   heapTimeSeries: HeapSample[] | null
+  // --- milestone-3 task-1 additions (appended only) ---
+  /**
+   * Process-global JSC compile time delta across the measurement window.
+   * Includes compiles of any function, not just scenario.tick.
+   * Zero or very small delta means the window was JIT-stable end to end.
+   * Complements dfgCompilesDelta (which only measures the tick wrapper closure).
+   */
+  totalCompileTimeMsDelta: number | null
 }
 
 // ---------------------------------------------------------------------------
@@ -455,11 +539,14 @@ export async function benchSustained(scenario: SustainedScenario): Promise<Susta
 
   // 4. Warmup — prime JIT without timing
   // --- task-10: CPU / JIT bracket begins immediately BEFORE warmup ---
+  // NOTE (milestone-3 task-1 fix): dfgCompilesFn takes scenario.tick as argument —
+  // it measures recompiles of the tick wrapper closure specifically.
   const cpuStart = process.cpuUsage()
   const jitStart = {
-    dfg: dfgCompilesFn !== null ? dfgCompilesFn() : null,
-    ftl: ftlCompilesFn !== null ? ftlCompilesFn() : null,
-    osrExits: osrExitsFn !== null ? osrExitsFn() : null,
+    dfg: dfgCompilesFn !== null ? dfgCompilesFn(scenario.tick) : null,
+    ftl: ftlCompilesFn !== null ? ftlCompilesFn(scenario.tick) : null,
+    osrExits: osrExitsFn !== null ? osrExitsFn(scenario.tick) : null,
+    totalCompileTimeMs: totalCompileTimeFn !== null ? totalCompileTimeFn() : null,
   }
 
   for (let i = 0; i < warmupTicks; i++) scenario.tick()
@@ -540,11 +627,13 @@ export async function benchSustained(scenario: SustainedScenario): Promise<Susta
   const heapSizeMB = +(finalStats.heapSize / 1024 / 1024).toFixed(2)
 
   // --- task-10: read CPU / JIT end (bracket ends AFTER post-loop GC + sleep)
+  // NOTE (milestone-3 task-1 fix): pass scenario.tick as argument to fn-arg counters.
   const cpuEnd = process.cpuUsage(cpuStart)
   const jitEnd = {
-    dfg: dfgCompilesFn !== null ? dfgCompilesFn() : null,
-    ftl: ftlCompilesFn !== null ? ftlCompilesFn() : null,
-    osrExits: osrExitsFn !== null ? osrExitsFn() : null,
+    dfg: dfgCompilesFn !== null ? dfgCompilesFn(scenario.tick) : null,
+    ftl: ftlCompilesFn !== null ? ftlCompilesFn(scenario.tick) : null,
+    osrExits: osrExitsFn !== null ? osrExitsFn(scenario.tick) : null,
+    totalCompileTimeMs: totalCompileTimeFn !== null ? totalCompileTimeFn() : null,
   }
 
   // Final RSS — sampled once and used for both rssMB and high-water update so
@@ -590,6 +679,10 @@ export async function benchSustained(scenario: SustainedScenario): Promise<Susta
     jitEnd.osrExits !== null && jitStart.osrExits !== null
       ? jitEnd.osrExits - jitStart.osrExits
       : null
+  const totalCompileTimeMsDelta =
+    jitEnd.totalCompileTimeMs !== null && jitStart.totalCompileTimeMs !== null
+      ? jitEnd.totalCompileTimeMs - jitStart.totalCompileTimeMs
+      : null
 
   const highWaterRssMB = +(highWaterRssBytes / (1024 * 1024)).toFixed(2)
 
@@ -614,6 +707,7 @@ export async function benchSustained(scenario: SustainedScenario): Promise<Susta
     osrExitsDelta,
     highWaterRssMB,
     heapTimeSeries: collectHeapTimeSeries ? heapTimeSeries : null,
+    totalCompileTimeMsDelta,
   }
 }
 
@@ -657,6 +751,7 @@ export function formatSustainedTable(results: SustainedResult[]): string {
   const COL_CPU_MS = 10
   const COL_DFG = 7
   const COL_HW_RSS = 10
+  const COL_COMPILE_MS = 12
 
   function pad(s: string, n: number, right = false): string {
     return right ? s.padStart(n) : s.padEnd(n)
@@ -685,6 +780,7 @@ export function formatSustainedTable(results: SustainedResult[]): string {
     pad('cpuMs', COL_CPU_MS, true),
     pad('dfgΔ', COL_DFG, true),
     pad('hwRssMB', COL_HW_RSS, true),
+    pad('totalCmpMs', COL_COMPILE_MS, true),
   ].join('  ')
 
   const sep = '-'.repeat(header.length)
@@ -705,6 +801,7 @@ export function formatSustainedTable(results: SustainedResult[]): string {
       pad((r.cpuTotalUs / 1000).toFixed(1), COL_CPU_MS, true),
       pad(r.dfgCompilesDelta !== null ? r.dfgCompilesDelta.toString() : '-', COL_DFG, true),
       pad(r.highWaterRssMB.toFixed(2), COL_HW_RSS, true),
+      pad(r.totalCompileTimeMsDelta !== null ? r.totalCompileTimeMsDelta.toFixed(1) : '-', COL_COMPILE_MS, true),
     ].join('  '),
   )
 

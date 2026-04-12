@@ -1,4 +1,25 @@
-# bun:jsc exposed keys
+bun:jsc probe — function categories
+===================================
+[zero-arg]
+  totalCompileTime() = 0 ms
+  heapSize() = 210336 bytes
+  memoryUsage() = [object] (not a scalar number — skipped for zero-arg category)
+  percentAvailableMemoryInUse() = 0.00044062966480851173
+[fn-arg]
+  (probeHot warmed with 1,000,000 iterations before sampling)
+  numberOfDFGCompiles(probeHot) = 2
+  numberOfFTLCompiles(probeHot) = <not present>
+  numberOfOSRExits(probeHot) = <not present>
+  numberOfOSREntries(probeHot) = <not present>
+  reoptimizationRetryCount(probeHot) = 1
+  optimizeNextInvocation(probeHot) = <unavailable> (returned undefined — may need different argument or not supported on Bun 1.3.8)
+  noFTL(probeHot) = <unavailable> (returned undefined — may need different argument or not supported on Bun 1.3.8)
+  noInline(probeHot) = <unavailable> (returned undefined — may need different argument or not supported on Bun 1.3.8)
+[resolved-for-harness]
+  jitCountersAvailable = ["numberOfDFGCompiles","reoptimizationRetryCount"]
+  totalCompileTime (zero-arg) = available
+
+# Full bun:jsc exposed keys (sorted)
 [
   "callerSourceOrigin",
   "codeCoverageForFile",
@@ -39,53 +60,40 @@
   "totalCompileTime"
 ]
 
-# parameterless function probe
+# Parameterless function probe (all zero-arg calls)
 callerSourceOrigin(): file:///Users/thada/gits/thaitype/rigidjs/benchmark/probe-jsc.ts
 codeCoverageForFile(): <throws: No source for file>
 describe(): undefined
 describeArray(): undefined
 deserialize(): <throws: First argument must be an ArrayBuffer>
 drainMicrotasks(): undefined
-edenGC(): 264759
+edenGC(): 302861
 estimateShallowMemoryUsageOf(): 0
-fullGC(): 263736
-gcAndSweep(): 263672
-generateHeapSnapshotForDebugging(): [object Object]
-getProtectedObjects(): <throws: Cannot convert a symbol to a string>
-getRandomSeed(): 3585312906
-heapSize(): 263697
-heapStats(): [object Object]
+fullGC(): 301768
+gcAndSweep(): 301724
+generateHeapSnapshotForDebugging(): [object — version, type, nodes...]
+getProtectedObjects(): [object — 0, 1, 2...]
+getRandomSeed(): 3847860520
+heapSize(): 301747
+heapStats(): [object — objectTypeCounts, protectedObjectTypeCounts, heapSize...]
 isRope(): false
 jscDescribe(): undefined
 jscDescribeArray(): undefined
-memoryUsage(): [object Object]
+memoryUsage(): [object — current, peak, currentCommit...]
 noFTL(): undefined
 noInline(): undefined
 noOSRExitFuzzing(): undefined
 numberOfDFGCompiles(): undefined
 optimizeNextInvocation(): undefined
-percentAvailableMemoryInUse(): 0.0005617463029921055
+percentAvailableMemoryInUse(): 0.0008936249651014805
 profile(): <throws: First argument must be a function.>
 releaseWeakRefs(): undefined
 reoptimizationRetryCount(): undefined
-samplingProfilerStackTraces(): [object Object]
-serialize(): [object SharedArrayBuffer]
+samplingProfilerStackTraces(): [object — interval, traces, sources...]
+serialize(): [object — ...]
 setRandomSeed(): undefined
 setTimeZone(): <throws: setTimeZone requires a timezone string>
 setTimezone(): <throws: setTimeZone requires a timezone string>
 startRemoteDebugger(): <throws: Failed to start server "127.0.0.1:9230". Is port already in use?>
 startSamplingProfiler(): undefined
 totalCompileTime(): 0
-
---- Probe Summary ---
-numberOfDFGCompiles: present as function, returns undefined (not a number on this Bun version 1.3.8)
-numberOfFTLCompiles: NOT present (no key in Object.keys(jsc))
-numberOfOSRExits: NOT present (no key in Object.keys(jsc))
-numberOfOSREntries: NOT present (no key in Object.keys(jsc))
-reoptimizationRetryCount: present as function, returns undefined (not a number on this Bun version 1.3.8)
-totalCompileTime: present as function, returns 0 (usable counter)
-
-Decision: dfgCompilesFn = null (returns undefined, not a countable number)
-          ftlCompilesFn = null (function not present)
-          osrExitsFn = null (function not present)
-meta.jitCountersAvailable = [] (no counters produce numeric values on Bun 1.3.8 arm64 darwin)

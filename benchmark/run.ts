@@ -447,12 +447,12 @@ function sustainedCpuRows(rs: SustainedResult[]): Array<{
 }
 
 // JIT deltas table for all scenarios
-function buildJitTable(allResults: Array<{ name: string; dfgCompilesDelta: number | null; ftlCompilesDelta: number | null; osrExitsDelta: number | null }>): string {
-  const header = `| name | dfgΔ | ftlΔ | osrExitsΔ |`
-  const sep = `|------|------|------|-----------|`
+function buildJitTable(allResults: Array<{ name: string; dfgCompilesDelta: number | null; ftlCompilesDelta: number | null; osrExitsDelta: number | null; totalCompileTimeMsDelta: number | null }>): string {
+  const header = `| name | dfgΔ | ftlΔ | osrExitsΔ | totalCmpMsΔ |`
+  const sep = `|------|------|------|-----------|-------------|`
   const rows = allResults.map(
     (r) =>
-      `| ${r.name} | ${t10FmtNull(r.dfgCompilesDelta)} | ${t10FmtNull(r.ftlCompilesDelta)} | ${t10FmtNull(r.osrExitsDelta)} |`,
+      `| ${r.name} | ${t10FmtNull(r.dfgCompilesDelta)} | ${t10FmtNull(r.ftlCompilesDelta)} | ${t10FmtNull(r.osrExitsDelta)} | ${r.totalCompileTimeMsDelta !== null ? r.totalCompileTimeMsDelta.toFixed(1) : '-'} |`,
   )
   return [header, sep, ...rows].join('\n')
 }
@@ -624,7 +624,25 @@ const task10BenchmarkMd = `# RigidJS Benchmark Report — Task 10 (CPU, JIT, Hig
 **Platform:** ${task10Meta.platform} / ${task10Meta.arch}
 **Date:** ${task10Meta.date}
 **XL enabled:** ${xlEnabled}
-**JIT counters available:** ${jitCountersAvailable.length > 0 ? jitCountersAvailable.join(', ') : `none (all null on Bun ${task10Meta.bunVersion})`}
+**JIT counters available:** ${jitCountersAvailable.length > 0 ? jitCountersAvailable.join(', ') : `none (all null in this run)`}
+
+---
+
+## Correction — JIT counter measurement fixed in milestone-3/task-1
+
+The original task-10 report (committed in milestone-2) showed all JIT counter columns as \`-\` (null) and attributed this to a "Bun 1.3.8 limitation". **That attribution was incorrect.** The root cause was a harness measurement bug: \`numberOfDFGCompiles\` and its sibling counters have the signature \`(fn: Function) => number\` — they are *per-function* counters that ask JSC "how many times has THIS specific function been DFG-compiled?". The probe and harness in task-10 called these counters with **zero arguments**, which returns \`undefined\`, which was then misinterpreted as "counter unavailable".
+
+Verified correct usage (Bun 1.3.8 darwin/arm64, from milestone-2 summary "Known measurement issues" section):
+\`\`\`ts
+import { numberOfDFGCompiles } from 'bun:jsc'
+const hot = (x: number) => x * x + x
+for (let i = 0; i < 1_000_000; i++) hot(i)   // warm into DFG tier
+console.log(numberOfDFGCompiles(hot))         // → 1 (real number)
+\`\`\`
+
+This re-run uses the corrected harness from milestone-3/task-1: \`benchmark/probe-jsc.ts\` now probes function-argument counters correctly (phase B probe), and \`benchmark/harness.ts\` now calls \`dfgCompilesFn(scenario.fn)\` / \`dfgCompilesFn(scenario.tick)\` at both bracket points. The \`dfgΔ\` / \`ftlΔ\` / \`osrExitsΔ\` / \`totalCmpMsΔ\` columns now carry real numbers.
+
+**Measurement blind spot (document for honest reading):** \`numberOfDFGCompiles(scenario.fn)\` measures recompiles of the **wrapper closure** only. If nested functions called inside the wrapper get deopted, JSC recompiles those inner functions separately — the wrapper compile count does not go up. The \`totalCompileTimeMsDelta\` column (process-global, zero-arg \`totalCompileTime()\` delta) is the catch-all signal that covers all functions compiled during the window. The two signals together are the best available from userland without JSC internals access.
 
 ---
 
@@ -632,7 +650,7 @@ const task10BenchmarkMd = `# RigidJS Benchmark Report — Task 10 (CPU, JIT, Hig
 
 Task-7 shipped B1–B7 with object-count evidence and established that RigidJS allocates ~300x fewer GC-tracked objects than plain JS. Task-8 corrected the allocation measurement by using \`liveObjectCount(heapStats())\` instead of the stale \`objectCount\` field. Task-9 added sustained B8 and B9 benchmarks and produced hard evidence that RigidJS wins on tail latency (p99, p999, max-tick) at 100k capacity under 10s sustained churn, while trading higher mean tick latency due to DataView dispatch cost.
 
-Task-10 adds four instrumentation categories — CPU comparison, JIT recompile counters, high-water RSS, and per-tick heap time-series — so the same B1–B9 workloads produce a richer evidence base. No scenario workloads, durations, or capacities were changed; the new signals wrap the existing measurement windows from the outside.
+Task-10 adds four instrumentation categories — CPU comparison, JIT recompile counters, high-water RSS, and per-tick heap time-series — so the same B1–B9 workloads produce a richer evidence base. No scenario workloads, durations, or capacities were changed; the new signals wrap the existing measurement windows from the outside. The JIT counter data in this re-run is now correct (see Correction block above).
 
 ---
 
@@ -691,8 +709,8 @@ For one-shot scenarios (B1, B7), the CPU bracket includes JIT warmup time. Rigid
 ${jitTable}
 
 ${jitCountersAvailable.length === 0
-  ? 'On Bun ' + task10Meta.bunVersion + ' (' + task10Meta.platform + '/' + task10Meta.arch + '), the `bun:jsc` module exposes `numberOfDFGCompiles` as a function but it returns `undefined` rather than a numeric count. No sibling counter (`numberOfFTLCompiles`, `numberOfOSRExits`) is exposed as a function at all. All JIT delta fields are therefore `null` for this run. This is a Bun version limitation — a future Bun version that returns a numeric counter from these functions will produce non-null deltas automatically (the harness probes and wires them at module load).'
-  : 'JIT counter deltas are available on this Bun version. A higher dfgΔ on JS variants vs RigidJS variants would indicate hidden-class thrash under churn — more DFG recompilations triggered by shape changes in the JS object heap. See the bun-jsc-probe.txt file for the full probe output.'}
+  ? 'No JIT counters returned finite values on Bun ' + task10Meta.bunVersion + ' (' + task10Meta.platform + '/' + task10Meta.arch + '). All JIT delta fields are `null` for this run. Check `bun-jsc-probe.txt` for the full probe output — if both zero-arg and fn-arg probes returned `<unavailable>`, the counters may not be exposed on this Bun build.'
+  : 'JIT counter deltas are available (corrected by milestone-3/task-1 — see Correction block above). A higher dfgΔ on JS variants vs RigidJS variants indicates hidden-class thrash: more DFG recompilations triggered by shape changes in the JS object heap. The `totalCmpMsΔ` column is a process-global secondary signal (all JSC compile time across the window, not just the scenario wrapper). See `bun-jsc-probe.txt` for the full probe output.\n\n**Blind spot:** dfgΔ only measures recompiles of the scenario wrapper closure. Recompiles of nested functions called inside the wrapper are not counted here — use `totalCmpMsΔ` as the catch-all.'}
 
 ---
 
@@ -730,8 +748,8 @@ ${(() => {
     : `The high-water RSS signal does not strongly favor either variant at this scale. Both peak at similar RSS values, which suggests the OS-level memory pressure from JS allocations is already reclaimed quickly enough not to cause sustained high-water divergence.`
 
   const jitNote = jitCountersAvailable.length === 0
-    ? `JIT counter data is unavailable on Bun ${task10Meta.bunVersion} — all delta fields are null. This is a Bun version limitation and cannot be interpreted as either supporting or contradicting the thesis.`
-    : `JIT delta data is available and shows ${results.some((r) => (r.dfgCompilesDelta ?? 0) > 0) ? 'DFG recompilations during the measurement window' : 'no DFG recompilations during the measurement window'}.`
+    ? `JIT counter data is unavailable on this run — all delta fields are null. Check bun-jsc-probe.txt for details.`
+    : `JIT delta data is now available (corrected in milestone-3/task-1). dfgΔ shows ${results.some((r) => (r.dfgCompilesDelta ?? 0) > 0) || [...b8Results, ...b9Results].some((r) => (r.dfgCompilesDelta ?? 0) > 0) ? 'some DFG recompilations during the measurement window — see the JIT compile deltas table for per-scenario detail' : 'zero DFG recompilations of the wrapper closure during the measurement window, consistent with both JS and RigidJS variants being JIT-stable after warmup'}. totalCmpMsΔ gives the process-global compile time signal.`
 
   if (b8RigidWinsP99v && b8RigidWinsP999v) {
     return `**Thesis supported by new instrumentation.** The task-9 finding that RigidJS wins on tail latency at 100k capacity is corroborated by the task-10 signals. RigidJS p99 is ${b8Rigid10.p99TickMs.toFixed(4)} ms versus JS ${b8Js10.p99TickMs.toFixed(4)} ms; p999 is ${b8Rigid10.p999TickMs.toFixed(4)} ms versus JS ${b8Js10.p999TickMs.toFixed(4)} ms. ${cpuNote} ${rssNote} ${jitNote}`
@@ -748,7 +766,7 @@ ${(() => {
 
 - Single-run numbers. GC timing, JIT compilation state, and OS scheduling all vary between runs. These are reference data points, not statistically significant regression gates.
 - Machine-dependent: measured on Bun ${task10Meta.bunVersion} / ${task10Meta.platform} / ${task10Meta.arch}. Results on different hardware or Bun versions may differ materially.
-- **JIT counters unavailable on Bun ${task10Meta.bunVersion}:** \`numberOfDFGCompiles\` is present in \`Object.keys(bun:jsc)\` but returns \`undefined\` rather than a numeric count on this version. No sibling counters (FTL, OSR) are exposed. All \`dfgCompilesDelta\`, \`ftlCompilesDelta\`, \`osrExitsDelta\` fields are \`null\` in this run's data.
+- **JIT counter measurement fix (milestone-3/task-1):** The original task-10 report attributed null JIT counters to a Bun limitation. That was wrong — the counters take a function argument and were called with zero arguments. This re-run uses the corrected harness. If \`dfgΔ\` / \`ftlΔ\` / \`osrExitsΔ\` still show \`-\` in the table, see the probe output in \`bun-jsc-probe.txt\` for the per-counter diagnosis. **Wrapper-only blind spot:** dfgΔ only measures recompiles of \`scenario.fn\` / \`scenario.tick\` (the wrapper closure). Recompiles of nested functions called inside the wrapper are not counted by dfgΔ — use \`totalCmpMsΔ\` (process-global) as the secondary signal for those.
 - **RSS polling overhead (one-shot bench()):** Strided polling with \`sampleMask\` adds ~16 \`process.memoryUsage()\` syscalls per scenario across the entire timing loop. B1 JS ops/sec: ${b1JsCurrent?.opsPerSec.toLocaleString() ?? 'N/A'} (task-8 baseline: ${task7B1JsOps.toLocaleString()}, delta: ${b1JsOpsDelta}%). B1 RigidJS ops/sec: ${b1RigidCurrent?.opsPerSec.toLocaleString() ?? 'N/A'} (task-8 baseline: ${task7B1RigidOps.toLocaleString()}, delta: ${b1RigidOpsDelta}%). ${Math.abs(parseFloat(b1JsOpsDelta as string)) <= 5 && Math.abs(parseFloat(b1RigidOpsDelta as string)) <= 5 ? 'Both deltas are within the 5% overhead budget.' : 'Deltas exceed the 5% budget. Single-run benchmark variance on macOS (JIT warmup, OS scheduling, process memory state) routinely produces >5% swings between runs — this is not instrumentation overhead but run-to-run noise. The actual cost of ~16 syscalls across a 10k-iteration loop is negligible (<0.1% on any modern CPU).'}
 - **B8 tick count vs task-9 baseline:** B8 JS ticks: ${b8Js10.ticksCompleted.toLocaleString()} (task-9: ${task9B8JsTicks.toLocaleString()}, delta: ${ticksDeltaJs}%). B8 RigidJS ticks: ${b8Rigid10.ticksCompleted.toLocaleString()} (task-9: ${task9B8RigidTicks.toLocaleString()}, delta: ${ticksDeltaRigid}%). ${Math.abs(parseFloat(ticksDeltaJs)) <= 10 && Math.abs(parseFloat(ticksDeltaRigid)) <= 10 ? 'Both within the 10% overhead budget.' : 'One or both deltas exceed the 10% budget — this may indicate elevated instrumentation cost or run-to-run variance.'}
 - Per-tick RSS sampling in \`benchSustained()\` adds one \`process.memoryUsage()\` syscall per tick. At B8's tick rate this adds ~1 µs of overhead per tick, which is ≤1% of per-tick cost.

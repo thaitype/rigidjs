@@ -3,2990 +3,2980 @@
     "bunVersion": "1.3.8",
     "platform": "darwin",
     "arch": "arm64",
-    "date": "2026-04-12T01:35:42.035Z",
+    "date": "2026-04-12T03:04:29.177Z",
     "xlEnabled": false,
-    "jitCountersAvailable": []
+    "jitCountersAvailable": [
+      "numberOfDFGCompiles",
+      "totalCompileTime"
+    ]
   },
   "oneShot": [
     {
       "name": "B1 JS baseline (100k {x,y,z} alloc)",
-      "opsPerSec": 773,
-      "heapObjectsBefore": 107887,
-      "heapObjectsAfter": 7925,
-      "heapObjectsDelta": -99962,
+      "opsPerSec": 649,
+      "heapObjectsBefore": 7903,
+      "heapObjectsAfter": 7943,
+      "heapObjectsDelta": 40,
       "allocationDelta": 100106,
-      "retainedAfterGC": 32,
-      "heapSizeMB": 15.05,
-      "rssMB": 89.78,
-      "p50Us": 1201.96,
-      "p99Us": 1912.54,
-      "cpuUserUs": 27623,
-      "cpuSystemUs": 12469,
-      "cpuTotalUs": 40092,
-      "dfgCompilesDelta": null,
+      "retainedAfterGC": 30,
+      "heapSizeMB": 15.07,
+      "rssMB": 78.7,
+      "p50Us": 1446.13,
+      "p99Us": 2871.21,
+      "cpuUserUs": 25272,
+      "cpuSystemUs": 10417,
+      "cpuTotalUs": 35689,
+      "dfgCompilesDelta": 1,
       "ftlCompilesDelta": null,
       "osrExitsDelta": null,
-      "highWaterRssMB": 89.78
+      "highWaterRssMB": 78.7,
+      "totalCompileTimeMsDelta": 0
     },
     {
       "name": "B1 RigidJS slab (100k inserts)",
-      "opsPerSec": 226,
-      "heapObjectsBefore": 7975,
-      "heapObjectsAfter": 8007,
-      "heapObjectsDelta": 32,
-      "allocationDelta": 317,
-      "retainedAfterGC": 57,
-      "heapSizeMB": 15.12,
-      "rssMB": 122.89,
-      "p50Us": 4473.63,
-      "p99Us": 6199.13,
-      "cpuUserUs": 89959,
-      "cpuSystemUs": 7913,
-      "cpuTotalUs": 97872,
-      "dfgCompilesDelta": null,
+      "opsPerSec": 190,
+      "heapObjectsBefore": 8082,
+      "heapObjectsAfter": 8021,
+      "heapObjectsDelta": -61,
+      "allocationDelta": 314,
+      "retainedAfterGC": 56,
+      "heapSizeMB": 15.11,
+      "rssMB": 115.56,
+      "p50Us": 4547.46,
+      "p99Us": 12270,
+      "cpuUserUs": 102353,
+      "cpuSystemUs": 9046,
+      "cpuTotalUs": 111399,
+      "dfgCompilesDelta": 3,
       "ftlCompilesDelta": null,
       "osrExitsDelta": null,
-      "highWaterRssMB": 122.89
+      "highWaterRssMB": 115.56,
+      "totalCompileTimeMsDelta": 0
     },
     {
       "name": "B2 JS baseline (10k insert+remove/frame)",
-      "opsPerSec": 5918,
-      "heapObjectsBefore": 8009,
-      "heapObjectsAfter": 8029,
+      "opsPerSec": 5496,
+      "heapObjectsBefore": 8027,
+      "heapObjectsAfter": 8047,
       "heapObjectsDelta": 20,
       "allocationDelta": null,
       "retainedAfterGC": null,
-      "heapSizeMB": 15.29,
-      "rssMB": 126.61,
-      "p50Us": 168.54,
-      "p99Us": 584.46,
-      "cpuUserUs": 28528,
-      "cpuSystemUs": 7454,
-      "cpuTotalUs": 35982,
-      "dfgCompilesDelta": null,
+      "heapSizeMB": 15.31,
+      "rssMB": 121.67,
+      "p50Us": 168,
+      "p99Us": 610.67,
+      "cpuUserUs": 30810,
+      "cpuSystemUs": 8539,
+      "cpuTotalUs": 39349,
+      "dfgCompilesDelta": 1,
       "ftlCompilesDelta": null,
       "osrExitsDelta": null,
-      "highWaterRssMB": 126.61
+      "highWaterRssMB": 121.67,
+      "totalCompileTimeMsDelta": 0
     },
     {
       "name": "B2 RigidJS slab (10k insert+remove/frame)",
-      "opsPerSec": 2798,
-      "heapObjectsBefore": 8044,
-      "heapObjectsAfter": 8068,
+      "opsPerSec": 2300,
+      "heapObjectsBefore": 8062,
+      "heapObjectsAfter": 8086,
       "heapObjectsDelta": 24,
       "allocationDelta": null,
       "retainedAfterGC": null,
-      "heapSizeMB": 15.36,
-      "rssMB": 126.95,
-      "p50Us": 349.25,
-      "p99Us": 623.58,
-      "cpuUserUs": 58543,
-      "cpuSystemUs": 3111,
-      "cpuTotalUs": 61654,
-      "dfgCompilesDelta": null,
+      "heapSizeMB": 15.38,
+      "rssMB": 122.19,
+      "p50Us": 459.88,
+      "p99Us": 944.5,
+      "cpuUserUs": 78526,
+      "cpuSystemUs": 4419,
+      "cpuTotalUs": 82945,
+      "dfgCompilesDelta": 1,
       "ftlCompilesDelta": null,
       "osrExitsDelta": null,
-      "highWaterRssMB": 126.95
+      "highWaterRssMB": 122.19,
+      "totalCompileTimeMsDelta": 0
     },
     {
       "name": "B3 JS baseline (100k pos.x += vel.x)",
-      "opsPerSec": 3346,
-      "heapObjectsBefore": 308061,
-      "heapObjectsAfter": 308082,
+      "opsPerSec": 2579,
+      "heapObjectsBefore": 308079,
+      "heapObjectsAfter": 308100,
       "heapObjectsDelta": 21,
       "allocationDelta": null,
       "retainedAfterGC": null,
-      "heapSizeMB": 28.34,
-      "rssMB": 128,
-      "p50Us": 274.17,
-      "p99Us": 736.21,
-      "cpuUserUs": 80562,
-      "cpuSystemUs": 2370,
-      "cpuTotalUs": 82932,
-      "dfgCompilesDelta": null,
+      "heapSizeMB": 28.37,
+      "rssMB": 123.59,
+      "p50Us": 336.67,
+      "p99Us": 974.08,
+      "cpuUserUs": 103387,
+      "cpuSystemUs": 3983,
+      "cpuTotalUs": 107370,
+      "dfgCompilesDelta": 1,
       "ftlCompilesDelta": null,
       "osrExitsDelta": null,
-      "highWaterRssMB": 128
+      "highWaterRssMB": 123.59,
+      "totalCompileTimeMsDelta": 0
     },
     {
       "name": "B3 RigidJS slab (100k h.pos.x += h.vel.x)",
-      "opsPerSec": 549,
-      "heapObjectsBefore": 308110,
-      "heapObjectsAfter": 308122,
+      "opsPerSec": 536,
+      "heapObjectsBefore": 308128,
+      "heapObjectsAfter": 308140,
       "heapObjectsDelta": 12,
       "allocationDelta": null,
       "retainedAfterGC": null,
-      "heapSizeMB": 28.38,
-      "rssMB": 128.5,
-      "p50Us": 1759.83,
-      "p99Us": 2810.79,
-      "cpuUserUs": 239552,
-      "cpuSystemUs": 2363,
-      "cpuTotalUs": 241915,
-      "dfgCompilesDelta": null,
+      "heapSizeMB": 28.41,
+      "rssMB": 114.34,
+      "p50Us": 1802.5,
+      "p99Us": 2607.08,
+      "cpuUserUs": 244749,
+      "cpuSystemUs": 5429,
+      "cpuTotalUs": 250178,
+      "dfgCompilesDelta": 1,
       "ftlCompilesDelta": null,
       "osrExitsDelta": null,
-      "highWaterRssMB": 128.5
+      "highWaterRssMB": 115.5,
+      "totalCompileTimeMsDelta": 0
     },
     {
       "name": "B7 JS nested (50k {pos:{x,y,z},vel:{x,y,z},life,id})",
-      "opsPerSec": 667,
-      "heapObjectsBefore": 458125,
-      "heapObjectsAfter": 308135,
-      "heapObjectsDelta": -149990,
+      "opsPerSec": 615,
+      "heapObjectsBefore": 308144,
+      "heapObjectsAfter": 308153,
+      "heapObjectsDelta": 9,
       "allocationDelta": 150087,
-      "retainedAfterGC": 16,
-      "heapSizeMB": 28.4,
-      "rssMB": 180.86,
-      "p50Us": 1390.96,
-      "p99Us": 2380.46,
-      "cpuUserUs": 58167,
-      "cpuSystemUs": 8344,
-      "cpuTotalUs": 66511,
-      "dfgCompilesDelta": null,
+      "retainedAfterGC": 17,
+      "heapSizeMB": 28.42,
+      "rssMB": 119.13,
+      "p50Us": 1074.29,
+      "p99Us": 4501,
+      "cpuUserUs": 37976,
+      "cpuSystemUs": 7900,
+      "cpuTotalUs": 45876,
+      "dfgCompilesDelta": 1,
       "ftlCompilesDelta": null,
       "osrExitsDelta": null,
-      "highWaterRssMB": 180.86
+      "highWaterRssMB": 119.19,
+      "totalCompileTimeMsDelta": 0
     },
     {
       "name": "B7 JS flat (50k {posX,posY,posZ,...,life,id})",
-      "opsPerSec": 1645,
-      "heapObjectsBefore": 358142,
-      "heapObjectsAfter": 308152,
-      "heapObjectsDelta": -49990,
-      "allocationDelta": 50097,
-      "retainedAfterGC": 24,
-      "heapSizeMB": 28.42,
-      "rssMB": 166.89,
-      "p50Us": 585.92,
-      "p99Us": 704.79,
-      "cpuUserUs": 47685,
-      "cpuSystemUs": 5718,
-      "cpuTotalUs": 53403,
-      "dfgCompilesDelta": null,
+      "opsPerSec": 1164,
+      "heapObjectsBefore": 308158,
+      "heapObjectsAfter": 308170,
+      "heapObjectsDelta": 12,
+      "allocationDelta": 50096,
+      "retainedAfterGC": 25,
+      "heapSizeMB": 28.44,
+      "rssMB": 107.16,
+      "p50Us": 738.33,
+      "p99Us": 1853.88,
+      "cpuUserUs": 40041,
+      "cpuSystemUs": 7888,
+      "cpuTotalUs": 47929,
+      "dfgCompilesDelta": 1,
       "ftlCompilesDelta": null,
       "osrExitsDelta": null,
-      "highWaterRssMB": 166.89
+      "highWaterRssMB": 107.16,
+      "totalCompileTimeMsDelta": 0
     },
     {
       "name": "B7 RigidJS nested struct (50k Particle slab)",
-      "opsPerSec": 231,
-      "heapObjectsBefore": 307981,
-      "heapObjectsAfter": 307993,
-      "heapObjectsDelta": 12,
+      "opsPerSec": 194,
+      "heapObjectsBefore": 307961,
+      "heapObjectsAfter": 307818,
+      "heapObjectsDelta": -143,
       "allocationDelta": 481,
-      "retainedAfterGC": 44,
-      "heapSizeMB": 31.37,
-      "rssMB": 187.23,
-      "p50Us": 4404.33,
-      "p99Us": 6041.29,
-      "cpuUserUs": 126839,
-      "cpuSystemUs": 5600,
-      "cpuTotalUs": 132439,
-      "dfgCompilesDelta": null,
+      "retainedAfterGC": -96,
+      "heapSizeMB": 28.22,
+      "rssMB": 112.66,
+      "p50Us": 4915.13,
+      "p99Us": 6188.79,
+      "cpuUserUs": 149086,
+      "cpuSystemUs": 11502,
+      "cpuTotalUs": 160588,
+      "dfgCompilesDelta": 2,
       "ftlCompilesDelta": null,
       "osrExitsDelta": null,
-      "highWaterRssMB": 187.23
+      "highWaterRssMB": 112.66,
+      "totalCompileTimeMsDelta": 0
     }
   ],
   "sustained": {
     "b8": [
       {
         "name": "B8 JS baseline (100k, 1k churn/tick, 10s)",
-        "ticksCompleted": 20040,
-        "meanTickMs": 0.1771,
-        "stdDevTickMs": 0.0541,
-        "p50TickMs": 0.1683,
-        "p99TickMs": 0.2922,
-        "p999TickMs": 0.7452,
-        "maxTickMs": 5.2142,
+        "ticksCompleted": 19320,
+        "meanTickMs": 0.1871,
+        "stdDevTickMs": 0.1012,
+        "p50TickMs": 0.168,
+        "p99TickMs": 0.5342,
+        "p999TickMs": 1.5565,
+        "maxTickMs": 4.1102,
         "allocationDelta": null,
         "heapSizeMB": 43.49,
-        "rssMB": 277.05,
-        "cpuUserUs": 10051913,
-        "cpuSystemUs": 93095,
-        "cpuTotalUs": 10145008,
-        "dfgCompilesDelta": null,
+        "rssMB": 278.95,
+        "cpuUserUs": 9768722,
+        "cpuSystemUs": 145081,
+        "cpuTotalUs": 9913803,
+        "dfgCompilesDelta": 1,
         "ftlCompilesDelta": null,
         "osrExitsDelta": null,
-        "highWaterRssMB": 282.55,
+        "highWaterRssMB": 278.95,
         "heapTimeSeries": [
           {
             "tick": 120,
-            "liveObjects": 817259,
-            "rssMB": 190.66
+            "liveObjects": 817274,
+            "rssMB": 127.36
           },
           {
             "tick": 240,
-            "liveObjects": 1177462,
-            "rssMB": 177.77
+            "liveObjects": 1177477,
+            "rssMB": 140.44
           },
           {
             "tick": 360,
-            "liveObjects": 1537617,
-            "rssMB": 177.78
+            "liveObjects": 1537632,
+            "rssMB": 156.44
           },
           {
             "tick": 480,
-            "liveObjects": 649153,
-            "rssMB": 177.86
+            "liveObjects": 649168,
+            "rssMB": 171.06
           },
           {
             "tick": 600,
-            "liveObjects": 1009356,
-            "rssMB": 177.88
+            "liveObjects": 1009371,
+            "rssMB": 171.06
           },
           {
             "tick": 720,
-            "liveObjects": 1369511,
-            "rssMB": 177.88
+            "liveObjects": 1369526,
+            "rssMB": 171.06
           },
           {
             "tick": 840,
-            "liveObjects": 1729670,
-            "rssMB": 177.88
+            "liveObjects": 1729685,
+            "rssMB": 171.08
           },
           {
             "tick": 960,
-            "liveObjects": 2089833,
-            "rssMB": 179.98
+            "liveObjects": 2089848,
+            "rssMB": 181.64
           },
           {
             "tick": 1080,
-            "liveObjects": 1033546,
-            "rssMB": 178.27
+            "liveObjects": 1032547,
+            "rssMB": 186.45
           },
           {
             "tick": 1200,
-            "liveObjects": 1393747,
-            "rssMB": 178.27
+            "liveObjects": 1392748,
+            "rssMB": 186.45
           },
           {
             "tick": 1320,
-            "liveObjects": 1753902,
-            "rssMB": 178.27
+            "liveObjects": 1752903,
+            "rssMB": 186.45
           },
           {
             "tick": 1440,
-            "liveObjects": 2114061,
-            "rssMB": 178.27
+            "liveObjects": 2113062,
+            "rssMB": 186.45
           },
           {
             "tick": 1560,
-            "liveObjects": 1057743,
-            "rssMB": 185.42
+            "liveObjects": 1056766,
+            "rssMB": 193.8
           },
           {
             "tick": 1680,
-            "liveObjects": 1417944,
-            "rssMB": 185.42
+            "liveObjects": 1416967,
+            "rssMB": 193.64
           },
           {
             "tick": 1800,
-            "liveObjects": 1778099,
-            "rssMB": 185.42
+            "liveObjects": 1777122,
+            "rssMB": 168.25
           },
           {
             "tick": 1920,
-            "liveObjects": 2138258,
-            "rssMB": 185.42
+            "liveObjects": 2137281,
+            "rssMB": 164.89
           },
           {
             "tick": 2040,
-            "liveObjects": 2498421,
-            "rssMB": 192.97
+            "liveObjects": 2497444,
+            "rssMB": 171.83
           },
           {
             "tick": 2160,
-            "liveObjects": 1437917,
-            "rssMB": 192.77
+            "liveObjects": 1440928,
+            "rssMB": 172.13
           },
           {
             "tick": 2280,
-            "liveObjects": 1798080,
-            "rssMB": 192.77
+            "liveObjects": 1801129,
+            "rssMB": 172.13
           },
           {
             "tick": 2400,
-            "liveObjects": 2158239,
-            "rssMB": 192.77
+            "liveObjects": 2161284,
+            "rssMB": 172.13
           },
           {
             "tick": 2520,
-            "liveObjects": 2518402,
-            "rssMB": 193.52
+            "liveObjects": 2521443,
+            "rssMB": 172.97
           },
           {
             "tick": 2640,
-            "liveObjects": 1461830,
-            "rssMB": 199.97
+            "liveObjects": 1465134,
+            "rssMB": 179.27
           },
           {
             "tick": 2760,
-            "liveObjects": 1821998,
-            "rssMB": 199.97
+            "liveObjects": 1825335,
+            "rssMB": 178.52
           },
           {
             "tick": 2880,
-            "liveObjects": 2182153,
-            "rssMB": 199.97
+            "liveObjects": 2185490,
+            "rssMB": 177.06
           },
           {
             "tick": 3000,
-            "liveObjects": 2542312,
-            "rssMB": 199.97
+            "liveObjects": 2545649,
+            "rssMB": 177.06
           },
           {
             "tick": 3120,
-            "liveObjects": 1485799,
-            "rssMB": 207.7
+            "liveObjects": 1488679,
+            "rssMB": 184.83
           },
           {
             "tick": 3240,
-            "liveObjects": 1845967,
-            "rssMB": 207.7
+            "liveObjects": 1848880,
+            "rssMB": 184.72
           },
           {
             "tick": 3360,
-            "liveObjects": 2206122,
-            "rssMB": 207.7
+            "liveObjects": 2209035,
+            "rssMB": 184.72
           },
           {
             "tick": 3480,
-            "liveObjects": 2566281,
-            "rssMB": 207.7
+            "liveObjects": 2569194,
+            "rssMB": 184.72
           },
           {
             "tick": 3600,
-            "liveObjects": 2926444,
-            "rssMB": 212.8
+            "liveObjects": 2929357,
+            "rssMB": 189.83
           },
           {
             "tick": 3720,
-            "liveObjects": 1870023,
-            "rssMB": 215.05
+            "liveObjects": 1872889,
+            "rssMB": 190.08
           },
           {
             "tick": 3840,
-            "liveObjects": 2230191,
-            "rssMB": 215.05
+            "liveObjects": 2233090,
+            "rssMB": 190.08
           },
           {
             "tick": 3960,
-            "liveObjects": 2590346,
-            "rssMB": 215.05
+            "liveObjects": 2593245,
+            "rssMB": 189.08
           },
           {
             "tick": 4080,
-            "liveObjects": 2950505,
-            "rssMB": 215.03
+            "liveObjects": 2953404,
+            "rssMB": 189.08
           },
           {
             "tick": 4200,
-            "liveObjects": 1894269,
-            "rssMB": 222.52
+            "liveObjects": 1897131,
+            "rssMB": 194.02
           },
           {
             "tick": 4320,
-            "liveObjects": 2254437,
-            "rssMB": 222.52
+            "liveObjects": 2257332,
+            "rssMB": 194.02
           },
           {
             "tick": 4440,
-            "liveObjects": 2614592,
-            "rssMB": 222.52
+            "liveObjects": 2617487,
+            "rssMB": 194.02
           },
           {
             "tick": 4560,
-            "liveObjects": 2974751,
-            "rssMB": 222.52
+            "liveObjects": 2977646,
+            "rssMB": 191.95
           },
           {
             "tick": 4680,
-            "liveObjects": 1918490,
-            "rssMB": 230.05
+            "liveObjects": 1921335,
+            "rssMB": 198.88
           },
           {
             "tick": 4800,
-            "liveObjects": 2278658,
-            "rssMB": 225.55
+            "liveObjects": 2281536,
+            "rssMB": 198.88
           },
           {
             "tick": 4920,
-            "liveObjects": 2638813,
-            "rssMB": 225.55
+            "liveObjects": 2641691,
+            "rssMB": 198.88
           },
           {
             "tick": 5040,
-            "liveObjects": 2998972,
-            "rssMB": 225.55
+            "liveObjects": 3001850,
+            "rssMB": 198.88
           },
           {
             "tick": 5160,
-            "liveObjects": 3359135,
-            "rssMB": 228.09
+            "liveObjects": 3362013,
+            "rssMB": 202.13
           },
           {
             "tick": 5280,
-            "liveObjects": 2302687,
-            "rssMB": 225.92
+            "liveObjects": 2305549,
+            "rssMB": 206.36
           },
           {
             "tick": 5400,
-            "liveObjects": 2662855,
-            "rssMB": 225.92
+            "liveObjects": 2665750,
+            "rssMB": 206.36
           },
           {
             "tick": 5520,
-            "liveObjects": 3023010,
-            "rssMB": 225.92
+            "liveObjects": 3025905,
+            "rssMB": 206.36
           },
           {
             "tick": 5640,
-            "liveObjects": 3383169,
-            "rssMB": 225.92
+            "liveObjects": 3386064,
+            "rssMB": 206.36
           },
           {
             "tick": 5760,
-            "liveObjects": 2326914,
-            "rssMB": 233.31
+            "liveObjects": 2326515,
+            "rssMB": 214.06
           },
           {
             "tick": 5880,
-            "liveObjects": 2687082,
-            "rssMB": 225.73
+            "liveObjects": 2686716,
+            "rssMB": 214.06
           },
           {
             "tick": 6000,
-            "liveObjects": 3047237,
-            "rssMB": 225.73
+            "liveObjects": 3046871,
+            "rssMB": 214.06
           },
           {
             "tick": 6120,
-            "liveObjects": 3407396,
-            "rssMB": 225.73
+            "liveObjects": 3407030,
+            "rssMB": 212.63
           },
           {
             "tick": 6240,
-            "liveObjects": 3767559,
-            "rssMB": 232.8
+            "liveObjects": 3767193,
+            "rssMB": 219.72
           },
           {
             "tick": 6360,
-            "liveObjects": 2710581,
-            "rssMB": 233.22
+            "liveObjects": 2710690,
+            "rssMB": 219.72
           },
           {
             "tick": 6480,
-            "liveObjects": 3070749,
-            "rssMB": 233.22
+            "liveObjects": 3070853,
+            "rssMB": 219.72
           },
           {
             "tick": 6600,
-            "liveObjects": 3430904,
-            "rssMB": 233.22
+            "liveObjects": 3431012,
+            "rssMB": 219.72
           },
           {
             "tick": 6720,
-            "liveObjects": 3791063,
-            "rssMB": 233.91
+            "liveObjects": 3791175,
+            "rssMB": 220.86
           },
           {
             "tick": 6840,
-            "liveObjects": 682237,
-            "rssMB": 241.63
+            "liveObjects": 691255,
+            "rssMB": 230.23
           },
           {
             "tick": 6960,
-            "liveObjects": 1042438,
-            "rssMB": 241.63
+            "liveObjects": 1051456,
+            "rssMB": 230.23
           },
           {
             "tick": 7080,
-            "liveObjects": 1402594,
-            "rssMB": 241.63
+            "liveObjects": 1411612,
+            "rssMB": 230.23
           },
           {
             "tick": 7200,
-            "liveObjects": 1762754,
-            "rssMB": 241.63
+            "liveObjects": 1771772,
+            "rssMB": 230.23
           },
           {
             "tick": 7320,
-            "liveObjects": 2122918,
-            "rssMB": 241.63
+            "liveObjects": 2131936,
+            "rssMB": 230.23
           },
           {
             "tick": 7440,
-            "liveObjects": 679246,
-            "rssMB": 241.63
+            "liveObjects": 702137,
+            "rssMB": 230.25
           },
           {
             "tick": 7560,
-            "liveObjects": 1039447,
-            "rssMB": 241.63
+            "liveObjects": 1062338,
+            "rssMB": 230.25
           },
           {
             "tick": 7680,
-            "liveObjects": 1399603,
-            "rssMB": 241.63
+            "liveObjects": 1422494,
+            "rssMB": 230.25
           },
           {
             "tick": 7800,
-            "liveObjects": 1759763,
-            "rssMB": 239.97
+            "liveObjects": 1782654,
+            "rssMB": 230.25
           },
           {
             "tick": 7920,
-            "liveObjects": 2119927,
-            "rssMB": 239.95
+            "liveObjects": 2142818,
+            "rssMB": 230.25
           },
           {
             "tick": 8040,
-            "liveObjects": 2480092,
-            "rssMB": 239.95
+            "liveObjects": 2502983,
+            "rssMB": 230.25
           },
           {
             "tick": 8160,
-            "liveObjects": 1036626,
-            "rssMB": 239.95
+            "liveObjects": 1071370,
+            "rssMB": 230.25
           },
           {
             "tick": 8280,
-            "liveObjects": 1396827,
-            "rssMB": 239.95
+            "liveObjects": 1431571,
+            "rssMB": 230.25
           },
           {
             "tick": 8400,
-            "liveObjects": 1756984,
-            "rssMB": 239.97
+            "liveObjects": 1791728,
+            "rssMB": 230.44
           },
           {
             "tick": 8520,
-            "liveObjects": 2117144,
-            "rssMB": 239.97
+            "liveObjects": 2151888,
+            "rssMB": 230.44
           },
           {
             "tick": 8640,
-            "liveObjects": 2477308,
-            "rssMB": 239.97
+            "liveObjects": 2512052,
+            "rssMB": 230.44
           },
           {
             "tick": 8760,
-            "liveObjects": 1033616,
-            "rssMB": 239.97
+            "liveObjects": 1080368,
+            "rssMB": 230.44
           },
           {
             "tick": 8880,
-            "liveObjects": 1393817,
-            "rssMB": 239.97
+            "liveObjects": 1440569,
+            "rssMB": 232.52
           },
           {
             "tick": 9000,
-            "liveObjects": 1753973,
-            "rssMB": 239.97
+            "liveObjects": 1800725,
+            "rssMB": 232.52
           },
           {
             "tick": 9120,
-            "liveObjects": 2114133,
-            "rssMB": 239.97
+            "liveObjects": 2160885,
+            "rssMB": 232.52
           },
           {
             "tick": 9240,
-            "liveObjects": 2474297,
-            "rssMB": 239.97
+            "liveObjects": 2521049,
+            "rssMB": 232.52
           },
           {
             "tick": 9360,
-            "liveObjects": 2834462,
-            "rssMB": 239.97
+            "liveObjects": 2881214,
+            "rssMB": 232.52
           },
           {
             "tick": 9480,
-            "liveObjects": 1390873,
-            "rssMB": 241.47
+            "liveObjects": 1449769,
+            "rssMB": 232.52
           },
           {
             "tick": 9600,
-            "liveObjects": 1751074,
-            "rssMB": 241.47
+            "liveObjects": 1809970,
+            "rssMB": 232.52
           },
           {
             "tick": 9720,
-            "liveObjects": 2111230,
-            "rssMB": 241.47
+            "liveObjects": 2170126,
+            "rssMB": 232.52
           },
           {
             "tick": 9840,
-            "liveObjects": 2471390,
-            "rssMB": 241.47
+            "liveObjects": 2530286,
+            "rssMB": 231.91
           },
           {
             "tick": 9960,
-            "liveObjects": 2831554,
-            "rssMB": 241.47
+            "liveObjects": 2890450,
+            "rssMB": 231.91
           },
           {
             "tick": 10080,
-            "liveObjects": 1388092,
-            "rssMB": 241.47
+            "liveObjects": 1459080,
+            "rssMB": 231.91
           },
           {
             "tick": 10200,
-            "liveObjects": 1748293,
-            "rssMB": 241.47
+            "liveObjects": 1819281,
+            "rssMB": 231.91
           },
           {
             "tick": 10320,
-            "liveObjects": 2108449,
-            "rssMB": 241.47
+            "liveObjects": 2179437,
+            "rssMB": 231.91
           },
           {
             "tick": 10440,
-            "liveObjects": 2468609,
-            "rssMB": 241.47
+            "liveObjects": 2539597,
+            "rssMB": 231.91
           },
           {
             "tick": 10560,
-            "liveObjects": 2828773,
-            "rssMB": 241.47
+            "liveObjects": 2899761,
+            "rssMB": 231.83
           },
           {
             "tick": 10680,
-            "liveObjects": 3188938,
-            "rssMB": 241.47
+            "liveObjects": 1468192,
+            "rssMB": 231.86
           },
           {
             "tick": 10800,
-            "liveObjects": 1745337,
-            "rssMB": 241.47
+            "liveObjects": 1828393,
+            "rssMB": 231.86
           },
           {
             "tick": 10920,
-            "liveObjects": 2105538,
-            "rssMB": 241.47
+            "liveObjects": 2188549,
+            "rssMB": 231.84
           },
           {
             "tick": 11040,
-            "liveObjects": 2465694,
-            "rssMB": 241.47
+            "liveObjects": 2548709,
+            "rssMB": 231.84
           },
           {
             "tick": 11160,
-            "liveObjects": 2825854,
-            "rssMB": 241.47
+            "liveObjects": 2908873,
+            "rssMB": 231.83
           },
           {
             "tick": 11280,
-            "liveObjects": 3186018,
-            "rssMB": 241.47
+            "liveObjects": 3269038,
+            "rssMB": 231.83
           },
           {
             "tick": 11400,
-            "liveObjects": 1742289,
-            "rssMB": 241.47
+            "liveObjects": 1837495,
+            "rssMB": 231.83
           },
           {
             "tick": 11520,
-            "liveObjects": 2102490,
-            "rssMB": 241.47
+            "liveObjects": 2197696,
+            "rssMB": 231.83
           },
           {
             "tick": 11640,
-            "liveObjects": 2462646,
-            "rssMB": 241.47
+            "liveObjects": 2557852,
+            "rssMB": 231.83
           },
           {
             "tick": 11760,
-            "liveObjects": 2822806,
-            "rssMB": 241.47
+            "liveObjects": 2918012,
+            "rssMB": 231.83
           },
           {
             "tick": 11880,
-            "liveObjects": 3182970,
-            "rssMB": 241.47
+            "liveObjects": 3278176,
+            "rssMB": 231.83
           },
           {
             "tick": 12000,
-            "liveObjects": 3543135,
-            "rssMB": 241.47
+            "liveObjects": 1846641,
+            "rssMB": 231.83
           },
           {
             "tick": 12120,
-            "liveObjects": 2099733,
-            "rssMB": 241.47
+            "liveObjects": 2206842,
+            "rssMB": 231.83
           },
           {
             "tick": 12240,
-            "liveObjects": 2459898,
-            "rssMB": 241.47
+            "liveObjects": 2566998,
+            "rssMB": 231.83
           },
           {
             "tick": 12360,
-            "liveObjects": 2820058,
-            "rssMB": 241.47
+            "liveObjects": 2927158,
+            "rssMB": 231.83
           },
           {
             "tick": 12480,
-            "liveObjects": 3180222,
-            "rssMB": 241.47
+            "liveObjects": 3287322,
+            "rssMB": 231.83
           },
           {
             "tick": 12600,
-            "liveObjects": 3540387,
-            "rssMB": 241.47
+            "liveObjects": 3647487,
+            "rssMB": 231.83
           },
           {
             "tick": 12720,
-            "liveObjects": 2096637,
-            "rssMB": 241.47
+            "liveObjects": 2215803,
+            "rssMB": 231.83
           },
           {
             "tick": 12840,
-            "liveObjects": 2456807,
-            "rssMB": 241.47
+            "liveObjects": 2576004,
+            "rssMB": 231.83
           },
           {
             "tick": 12960,
-            "liveObjects": 2816963,
-            "rssMB": 241.47
+            "liveObjects": 2936160,
+            "rssMB": 231.83
           },
           {
             "tick": 13080,
-            "liveObjects": 3177123,
-            "rssMB": 241.47
+            "liveObjects": 3296320,
+            "rssMB": 231.83
           },
           {
             "tick": 13200,
-            "liveObjects": 3537287,
-            "rssMB": 241.47
+            "liveObjects": 3656484,
+            "rssMB": 231.83
           },
           {
             "tick": 13320,
-            "liveObjects": 2091803,
-            "rssMB": 241.47
+            "liveObjects": 2224775,
+            "rssMB": 231.83
           },
           {
             "tick": 13440,
-            "liveObjects": 2451973,
-            "rssMB": 241.47
+            "liveObjects": 2584976,
+            "rssMB": 231.83
           },
           {
             "tick": 13560,
-            "liveObjects": 2812129,
-            "rssMB": 241.47
+            "liveObjects": 2945132,
+            "rssMB": 231.83
           },
           {
             "tick": 13680,
-            "liveObjects": 3172289,
-            "rssMB": 241.47
+            "liveObjects": 3305292,
+            "rssMB": 231.83
           },
           {
             "tick": 13800,
-            "liveObjects": 3532453,
-            "rssMB": 241.47
+            "liveObjects": 3665456,
+            "rssMB": 231.83
           },
           {
             "tick": 13920,
-            "liveObjects": 3892618,
-            "rssMB": 241.47
+            "liveObjects": 2233783,
+            "rssMB": 235.14
           },
           {
             "tick": 14040,
-            "liveObjects": 2449000,
-            "rssMB": 244.25
+            "liveObjects": 2593984,
+            "rssMB": 235.14
           },
           {
             "tick": 14160,
-            "liveObjects": 2809170,
-            "rssMB": 244.25
+            "liveObjects": 2954140,
+            "rssMB": 235.14
           },
           {
             "tick": 14280,
-            "liveObjects": 3169326,
-            "rssMB": 244.25
+            "liveObjects": 3314300,
+            "rssMB": 235.14
           },
           {
             "tick": 14400,
-            "liveObjects": 3529486,
-            "rssMB": 244.25
+            "liveObjects": 3674464,
+            "rssMB": 235.13
           },
           {
             "tick": 14520,
-            "liveObjects": 3889650,
-            "rssMB": 244.25
+            "liveObjects": 4034629,
+            "rssMB": 236.38
           },
           {
             "tick": 14640,
-            "liveObjects": 2445976,
-            "rssMB": 251.47
+            "liveObjects": 2602862,
+            "rssMB": 242.17
           },
           {
             "tick": 14760,
-            "liveObjects": 2806146,
-            "rssMB": 251.47
+            "liveObjects": 2963063,
+            "rssMB": 242.17
           },
           {
             "tick": 14880,
-            "liveObjects": 3166302,
-            "rssMB": 251.47
+            "liveObjects": 3323219,
+            "rssMB": 242.17
           },
           {
             "tick": 15000,
-            "liveObjects": 3526462,
-            "rssMB": 251.47
+            "liveObjects": 3683379,
+            "rssMB": 242
           },
           {
             "tick": 15120,
-            "liveObjects": 3886626,
-            "rssMB": 251.47
+            "liveObjects": 4043543,
+            "rssMB": 242
           },
           {
             "tick": 15240,
-            "liveObjects": 4246791,
-            "rssMB": 255.25
+            "liveObjects": 2611917,
+            "rssMB": 249.06
           },
           {
             "tick": 15360,
-            "liveObjects": 2800706,
-            "rssMB": 259.06
+            "liveObjects": 2972118,
+            "rssMB": 249.03
           },
           {
             "tick": 15480,
-            "liveObjects": 3160876,
-            "rssMB": 259.06
+            "liveObjects": 3332274,
+            "rssMB": 249.03
           },
           {
             "tick": 15600,
-            "liveObjects": 3521032,
-            "rssMB": 259.06
+            "liveObjects": 3692434,
+            "rssMB": 248.81
           },
           {
             "tick": 15720,
-            "liveObjects": 3881192,
-            "rssMB": 259.06
+            "liveObjects": 4052598,
+            "rssMB": 245.89
           },
           {
             "tick": 15840,
-            "liveObjects": 4241356,
-            "rssMB": 259.06
+            "liveObjects": 4412763,
+            "rssMB": 250.83
           },
           {
             "tick": 15960,
-            "liveObjects": 2797760,
-            "rssMB": 266.06
+            "liveObjects": 2981165,
+            "rssMB": 253.5
           },
           {
             "tick": 16080,
-            "liveObjects": 3157930,
-            "rssMB": 266.06
+            "liveObjects": 3341366,
+            "rssMB": 253.5
           },
           {
             "tick": 16200,
-            "liveObjects": 3518086,
-            "rssMB": 266.06
+            "liveObjects": 3701522,
+            "rssMB": 253.5
           },
           {
             "tick": 16320,
-            "liveObjects": 3878246,
-            "rssMB": 266.06
+            "liveObjects": 4061682,
+            "rssMB": 253.5
           },
           {
             "tick": 16440,
-            "liveObjects": 4238410,
-            "rssMB": 266.06
+            "liveObjects": 4421846,
+            "rssMB": 253.31
           },
           {
             "tick": 16560,
-            "liveObjects": 4598575,
-            "rssMB": 271.77
+            "liveObjects": 2990319,
+            "rssMB": 260.53
           },
           {
             "tick": 16680,
-            "liveObjects": 3153657,
-            "rssMB": 273.59
+            "liveObjects": 3350520,
+            "rssMB": 260.53
           },
           {
             "tick": 16800,
-            "liveObjects": 3513827,
-            "rssMB": 273.59
+            "liveObjects": 3710676,
+            "rssMB": 260.53
           },
           {
             "tick": 16920,
-            "liveObjects": 3873983,
-            "rssMB": 273.59
+            "liveObjects": 4070836,
+            "rssMB": 260.53
           },
           {
             "tick": 17040,
-            "liveObjects": 4234143,
-            "rssMB": 273.59
+            "liveObjects": 4431000,
+            "rssMB": 260.53
           },
           {
             "tick": 17160,
-            "liveObjects": 4594307,
-            "rssMB": 273.59
+            "liveObjects": 3000062,
+            "rssMB": 267.95
           },
           {
             "tick": 17280,
-            "liveObjects": 3150795,
-            "rssMB": 280.73
+            "liveObjects": 3360263,
+            "rssMB": 267.95
           },
           {
             "tick": 17400,
-            "liveObjects": 3510965,
-            "rssMB": 280.73
+            "liveObjects": 3720419,
+            "rssMB": 267.95
           },
           {
             "tick": 17520,
-            "liveObjects": 3871121,
-            "rssMB": 280.73
+            "liveObjects": 4080579,
+            "rssMB": 267.95
           },
           {
             "tick": 17640,
-            "liveObjects": 4231281,
-            "rssMB": 280.73
+            "liveObjects": 4440743,
+            "rssMB": 267.95
           },
           {
             "tick": 17760,
-            "liveObjects": 4591445,
-            "rssMB": 275.34
+            "liveObjects": 4800908,
+            "rssMB": 268.86
           },
           {
             "tick": 17880,
-            "liveObjects": 3147858,
-            "rssMB": 282.53
+            "liveObjects": 3369180,
+            "rssMB": 275.41
           },
           {
             "tick": 18000,
-            "liveObjects": 3508028,
-            "rssMB": 282.53
+            "liveObjects": 3729381,
+            "rssMB": 275.41
           },
           {
             "tick": 18120,
-            "liveObjects": 3868184,
-            "rssMB": 282.55
+            "liveObjects": 4089537,
+            "rssMB": 275.39
           },
           {
             "tick": 18240,
-            "liveObjects": 4228344,
-            "rssMB": 282.55
+            "liveObjects": 4449697,
+            "rssMB": 275.31
           },
           {
             "tick": 18360,
-            "liveObjects": 4588508,
-            "rssMB": 271.61
+            "liveObjects": 4809861,
+            "rssMB": 268.58
           },
           {
             "tick": 18480,
-            "liveObjects": 4948673,
-            "rssMB": 271.73
+            "liveObjects": 538133,
+            "rssMB": 277.34
           },
           {
             "tick": 18600,
-            "liveObjects": 673178,
-            "rssMB": 281.08
+            "liveObjects": 898334,
+            "rssMB": 277.08
           },
           {
             "tick": 18720,
-            "liveObjects": 1033379,
-            "rssMB": 281.08
+            "liveObjects": 1258490,
+            "rssMB": 277.08
           },
           {
             "tick": 18840,
-            "liveObjects": 1393535,
-            "rssMB": 281.08
+            "liveObjects": 1618650,
+            "rssMB": 277.84
           },
           {
             "tick": 18960,
-            "liveObjects": 1753695,
-            "rssMB": 281.08
+            "liveObjects": 1978814,
+            "rssMB": 277.86
           },
           {
             "tick": 19080,
-            "liveObjects": 2113859,
-            "rssMB": 275.28
+            "liveObjects": 2338979,
+            "rssMB": 277.86
           },
           {
             "tick": 19200,
-            "liveObjects": 706185,
-            "rssMB": 275.38
+            "liveObjects": 880445,
+            "rssMB": 277.84
           },
           {
             "tick": 19320,
-            "liveObjects": 1066386,
-            "rssMB": 275.38
-          },
-          {
-            "tick": 19440,
-            "liveObjects": 1426542,
-            "rssMB": 275.97
-          },
-          {
-            "tick": 19560,
-            "liveObjects": 1786702,
-            "rssMB": 275.97
-          },
-          {
-            "tick": 19680,
-            "liveObjects": 2146866,
-            "rssMB": 275.97
-          },
-          {
-            "tick": 19800,
-            "liveObjects": 2507031,
-            "rssMB": 275.95
-          },
-          {
-            "tick": 19920,
-            "liveObjects": 1099325,
-            "rssMB": 275.95
-          },
-          {
-            "tick": 20040,
-            "liveObjects": 1459526,
-            "rssMB": 275.95
+            "liveObjects": 1240646,
+            "rssMB": 277.84
           }
-        ]
+        ],
+        "totalCompileTimeMsDelta": 0
       },
       {
         "name": "B8 RigidJS slab (100k, 1k churn/tick, 10s)",
-        "ticksCompleted": 42959,
-        "meanTickMs": 0.1751,
-        "stdDevTickMs": 0.0067,
-        "p50TickMs": 0.1738,
-        "p99TickMs": 0.1976,
-        "p999TickMs": 0.2297,
-        "maxTickMs": 0.3414,
+        "ticksCompleted": 42840,
+        "meanTickMs": 0.1752,
+        "stdDevTickMs": 0.0151,
+        "p50TickMs": 0.1717,
+        "p99TickMs": 0.2166,
+        "p999TickMs": 0.3955,
+        "maxTickMs": 0.8805,
         "allocationDelta": null,
         "heapSizeMB": 43.58,
-        "rssMB": 166.84,
-        "cpuUserUs": 9997263,
-        "cpuSystemUs": 65797,
-        "cpuTotalUs": 10063060,
-        "dfgCompilesDelta": null,
+        "rssMB": 175.2,
+        "cpuUserUs": 9985025,
+        "cpuSystemUs": 71809,
+        "cpuTotalUs": 10056834,
+        "dfgCompilesDelta": 1,
         "ftlCompilesDelta": null,
         "osrExitsDelta": null,
-        "highWaterRssMB": 299.98,
+        "highWaterRssMB": 301.02,
         "heapTimeSeries": [
           {
             "tick": 120,
-            "liveObjects": 457362,
-            "rssMB": 299.98
+            "liveObjects": 457372,
+            "rssMB": 300.83
           },
           {
             "tick": 240,
-            "liveObjects": 457563,
-            "rssMB": 299.98
+            "liveObjects": 457573,
+            "rssMB": 300.83
           },
           {
             "tick": 360,
-            "liveObjects": 457718,
-            "rssMB": 299.69
+            "liveObjects": 457728,
+            "rssMB": 300.83
           },
           {
             "tick": 480,
-            "liveObjects": 457877,
-            "rssMB": 299.72
+            "liveObjects": 457887,
+            "rssMB": 300.88
           },
           {
             "tick": 600,
-            "liveObjects": 458040,
-            "rssMB": 299.72
+            "liveObjects": 458050,
+            "rssMB": 300.88
           },
           {
             "tick": 720,
-            "liveObjects": 458205,
-            "rssMB": 299.72
+            "liveObjects": 458215,
+            "rssMB": 300.88
           },
           {
             "tick": 840,
-            "liveObjects": 458372,
-            "rssMB": 299.72
+            "liveObjects": 458382,
+            "rssMB": 300.88
           },
           {
             "tick": 960,
-            "liveObjects": 458502,
-            "rssMB": 299.72
+            "liveObjects": 458512,
+            "rssMB": 300.88
           },
           {
             "tick": 1080,
-            "liveObjects": 458632,
-            "rssMB": 299.72
+            "liveObjects": 458642,
+            "rssMB": 300.88
           },
           {
             "tick": 1200,
-            "liveObjects": 458762,
-            "rssMB": 299.72
+            "liveObjects": 458772,
+            "rssMB": 300.88
           },
           {
             "tick": 1320,
-            "liveObjects": 458892,
-            "rssMB": 299.73
+            "liveObjects": 458902,
+            "rssMB": 300.89
           },
           {
             "tick": 1440,
-            "liveObjects": 459060,
-            "rssMB": 299.73
+            "liveObjects": 459070,
+            "rssMB": 300.89
           },
           {
             "tick": 1560,
-            "liveObjects": 459190,
-            "rssMB": 299.73
+            "liveObjects": 459200,
+            "rssMB": 300.89
           },
           {
             "tick": 1680,
-            "liveObjects": 459320,
-            "rssMB": 299.73
+            "liveObjects": 459330,
+            "rssMB": 300.89
           },
           {
             "tick": 1800,
-            "liveObjects": 459450,
-            "rssMB": 299.73
+            "liveObjects": 459460,
+            "rssMB": 300.89
           },
           {
             "tick": 1920,
-            "liveObjects": 459580,
-            "rssMB": 299.73
+            "liveObjects": 459590,
+            "rssMB": 300.89
           },
           {
             "tick": 2040,
-            "liveObjects": 459750,
-            "rssMB": 299.73
+            "liveObjects": 459760,
+            "rssMB": 300.89
           },
           {
             "tick": 2160,
-            "liveObjects": 459944,
-            "rssMB": 299.75
+            "liveObjects": 459954,
+            "rssMB": 300.91
           },
           {
             "tick": 2280,
-            "liveObjects": 460117,
-            "rssMB": 299.75
+            "liveObjects": 460127,
+            "rssMB": 300.92
           },
           {
             "tick": 2400,
-            "liveObjects": 460247,
-            "rssMB": 299.75
+            "liveObjects": 460257,
+            "rssMB": 300.92
           },
           {
             "tick": 2520,
-            "liveObjects": 460377,
-            "rssMB": 299.75
+            "liveObjects": 460387,
+            "rssMB": 300.94
           },
           {
             "tick": 2640,
-            "liveObjects": 460507,
-            "rssMB": 299.75
+            "liveObjects": 460517,
+            "rssMB": 300.94
           },
           {
             "tick": 2760,
-            "liveObjects": 460687,
-            "rssMB": 299.75
+            "liveObjects": 460697,
+            "rssMB": 300.94
           },
           {
             "tick": 2880,
-            "liveObjects": 460817,
-            "rssMB": 299.75
+            "liveObjects": 460827,
+            "rssMB": 300.94
           },
           {
             "tick": 3000,
-            "liveObjects": 460947,
-            "rssMB": 299.77
+            "liveObjects": 460957,
+            "rssMB": 300.94
           },
           {
             "tick": 3120,
-            "liveObjects": 461077,
-            "rssMB": 299.77
+            "liveObjects": 461087,
+            "rssMB": 300.94
           },
           {
             "tick": 3240,
-            "liveObjects": 461251,
-            "rssMB": 299.78
+            "liveObjects": 461261,
+            "rssMB": 300.95
           },
           {
             "tick": 3360,
-            "liveObjects": 461432,
-            "rssMB": 299.78
+            "liveObjects": 461442,
+            "rssMB": 300.95
           },
           {
             "tick": 3480,
-            "liveObjects": 461562,
-            "rssMB": 299.78
+            "liveObjects": 461572,
+            "rssMB": 300.95
           },
           {
             "tick": 3600,
-            "liveObjects": 461744,
-            "rssMB": 299.78
+            "liveObjects": 461754,
+            "rssMB": 300.97
           },
           {
             "tick": 3720,
-            "liveObjects": 461939,
-            "rssMB": 299.8
+            "liveObjects": 461949,
+            "rssMB": 300.97
           },
           {
             "tick": 3840,
-            "liveObjects": 462115,
-            "rssMB": 294.11
+            "liveObjects": 462125,
+            "rssMB": 300.97
           },
           {
             "tick": 3960,
-            "liveObjects": 462245,
-            "rssMB": 294.13
+            "liveObjects": 462255,
+            "rssMB": 300.97
           },
           {
             "tick": 4080,
-            "liveObjects": 462422,
-            "rssMB": 294.14
+            "liveObjects": 462432,
+            "rssMB": 300.97
           },
           {
             "tick": 4200,
-            "liveObjects": 462552,
-            "rssMB": 294.14
+            "liveObjects": 462562,
+            "rssMB": 300.97
           },
           {
             "tick": 4320,
-            "liveObjects": 462682,
-            "rssMB": 294.16
+            "liveObjects": 462692,
+            "rssMB": 300.98
           },
           {
             "tick": 4440,
-            "liveObjects": 462860,
-            "rssMB": 294.19
+            "liveObjects": 462870,
+            "rssMB": 300.98
           },
           {
             "tick": 4560,
-            "liveObjects": 463043,
-            "rssMB": 286.38
+            "liveObjects": 463053,
+            "rssMB": 300.98
           },
           {
             "tick": 4680,
-            "liveObjects": 463173,
-            "rssMB": 286.38
+            "liveObjects": 463183,
+            "rssMB": 300.98
           },
           {
             "tick": 4800,
-            "liveObjects": 463303,
-            "rssMB": 286.39
+            "liveObjects": 463313,
+            "rssMB": 300.98
           },
           {
             "tick": 4920,
-            "liveObjects": 463433,
-            "rssMB": 286.39
+            "liveObjects": 463443,
+            "rssMB": 300.98
           },
           {
             "tick": 5040,
-            "liveObjects": 463563,
-            "rssMB": 286.41
+            "liveObjects": 463573,
+            "rssMB": 300.98
           },
           {
             "tick": 5160,
-            "liveObjects": 463693,
-            "rssMB": 286.41
+            "liveObjects": 463703,
+            "rssMB": 300.98
           },
           {
             "tick": 5280,
-            "liveObjects": 463823,
-            "rssMB": 286.41
+            "liveObjects": 463833,
+            "rssMB": 300.98
           },
           {
             "tick": 5400,
-            "liveObjects": 463953,
-            "rssMB": 286.42
+            "liveObjects": 463963,
+            "rssMB": 300.98
           },
           {
             "tick": 5520,
-            "liveObjects": 464083,
-            "rssMB": 286.42
+            "liveObjects": 464093,
+            "rssMB": 300.98
           },
           {
             "tick": 5640,
-            "liveObjects": 464267,
-            "rssMB": 286.44
+            "liveObjects": 464223,
+            "rssMB": 300.98
           },
           {
             "tick": 5760,
-            "liveObjects": 464397,
-            "rssMB": 286.45
+            "liveObjects": 464353,
+            "rssMB": 300.98
           },
           {
             "tick": 5880,
-            "liveObjects": 464527,
-            "rssMB": 286.47
+            "liveObjects": 464483,
+            "rssMB": 300.98
           },
           {
             "tick": 6000,
-            "liveObjects": 464657,
-            "rssMB": 286.48
+            "liveObjects": 464613,
+            "rssMB": 300.98
           },
           {
             "tick": 6120,
-            "liveObjects": 464842,
-            "rssMB": 286.53
+            "liveObjects": 464797,
+            "rssMB": 301
           },
           {
             "tick": 6240,
-            "liveObjects": 464972,
-            "rssMB": 286.53
+            "liveObjects": 464982,
+            "rssMB": 301
           },
           {
             "tick": 6360,
-            "liveObjects": 465158,
-            "rssMB": 286.55
+            "liveObjects": 465168,
+            "rssMB": 301
           },
           {
             "tick": 6480,
-            "liveObjects": 465288,
-            "rssMB": 286.55
+            "liveObjects": 465298,
+            "rssMB": 301
           },
           {
             "tick": 6600,
-            "liveObjects": 465418,
-            "rssMB": 286.58
+            "liveObjects": 465428,
+            "rssMB": 301
           },
           {
             "tick": 6720,
-            "liveObjects": 465548,
-            "rssMB": 286.59
+            "liveObjects": 465558,
+            "rssMB": 301.02
           },
           {
             "tick": 6840,
-            "liveObjects": 465735,
-            "rssMB": 286.61
+            "liveObjects": 465745,
+            "rssMB": 301.02
           },
           {
             "tick": 6960,
-            "liveObjects": 465865,
-            "rssMB": 286.61
+            "liveObjects": 465875,
+            "rssMB": 301.02
           },
           {
             "tick": 7080,
-            "liveObjects": 466044,
-            "rssMB": 286.63
+            "liveObjects": 466054,
+            "rssMB": 301.02
           },
           {
             "tick": 7200,
-            "liveObjects": 466174,
-            "rssMB": 286.63
+            "liveObjects": 466184,
+            "rssMB": 300.5
           },
           {
             "tick": 7320,
-            "liveObjects": 466304,
-            "rssMB": 286.64
+            "liveObjects": 466314,
+            "rssMB": 287.67
           },
           {
             "tick": 7440,
-            "liveObjects": 466434,
-            "rssMB": 286.64
+            "liveObjects": 466444,
+            "rssMB": 287.67
           },
           {
             "tick": 7560,
-            "liveObjects": 466564,
-            "rssMB": 286.66
+            "liveObjects": 466574,
+            "rssMB": 287.69
           },
           {
             "tick": 7680,
-            "liveObjects": 466744,
-            "rssMB": 278.19
+            "liveObjects": 466754,
+            "rssMB": 287.7
           },
           {
             "tick": 7800,
-            "liveObjects": 466874,
-            "rssMB": 278.22
+            "liveObjects": 466884,
+            "rssMB": 287.73
           },
           {
             "tick": 7920,
-            "liveObjects": 467055,
-            "rssMB": 278.22
+            "liveObjects": 467065,
+            "rssMB": 287.73
           },
           {
             "tick": 8040,
-            "liveObjects": 467185,
-            "rssMB": 278.23
+            "liveObjects": 467195,
+            "rssMB": 287.75
           },
           {
             "tick": 8160,
-            "liveObjects": 467315,
-            "rssMB": 278.23
+            "liveObjects": 467325,
+            "rssMB": 287.77
           },
           {
             "tick": 8280,
-            "liveObjects": 467445,
-            "rssMB": 278.25
+            "liveObjects": 467455,
+            "rssMB": 287.78
           },
           {
             "tick": 8400,
-            "liveObjects": 467575,
-            "rssMB": 278.25
+            "liveObjects": 467585,
+            "rssMB": 275.19
           },
           {
             "tick": 8520,
-            "liveObjects": 467705,
-            "rssMB": 278.27
+            "liveObjects": 467715,
+            "rssMB": 275.19
           },
           {
             "tick": 8640,
-            "liveObjects": 467835,
-            "rssMB": 278.3
+            "liveObjects": 467845,
+            "rssMB": 275.2
           },
           {
             "tick": 8760,
-            "liveObjects": 467965,
-            "rssMB": 278.31
+            "liveObjects": 467975,
+            "rssMB": 275.22
           },
           {
             "tick": 8880,
-            "liveObjects": 468147,
-            "rssMB": 278.33
+            "liveObjects": 468157,
+            "rssMB": 275.23
           },
           {
             "tick": 9000,
-            "liveObjects": 468277,
-            "rssMB": 272.92
+            "liveObjects": 468287,
+            "rssMB": 275.13
           },
           {
             "tick": 9120,
-            "liveObjects": 468407,
-            "rssMB": 272.92
+            "liveObjects": 468417,
+            "rssMB": 275.13
           },
           {
             "tick": 9240,
-            "liveObjects": 468537,
-            "rssMB": 272.95
+            "liveObjects": 468547,
+            "rssMB": 275.16
           },
           {
             "tick": 9360,
-            "liveObjects": 468667,
-            "rssMB": 272.95
+            "liveObjects": 468677,
+            "rssMB": 275.16
           },
           {
             "tick": 9480,
-            "liveObjects": 468797,
-            "rssMB": 272.97
+            "liveObjects": 468807,
+            "rssMB": 275.2
           },
           {
             "tick": 9600,
-            "liveObjects": 468985,
-            "rssMB": 270.69
+            "liveObjects": 468995,
+            "rssMB": 275.2
           },
           {
             "tick": 9720,
-            "liveObjects": 469115,
-            "rssMB": 270.7
+            "liveObjects": 469125,
+            "rssMB": 275.22
           },
           {
             "tick": 9840,
-            "liveObjects": 469245,
-            "rssMB": 270.72
+            "liveObjects": 469255,
+            "rssMB": 275.22
           },
           {
             "tick": 9960,
-            "liveObjects": 469428,
-            "rssMB": 270.73
+            "liveObjects": 469385,
+            "rssMB": 275.23
           },
           {
             "tick": 10080,
-            "liveObjects": 469558,
-            "rssMB": 270.73
+            "liveObjects": 469515,
+            "rssMB": 271.91
           },
           {
             "tick": 10200,
-            "liveObjects": 469688,
-            "rssMB": 270.75
+            "liveObjects": 469645,
+            "rssMB": 271.92
           },
           {
             "tick": 10320,
-            "liveObjects": 469818,
-            "rssMB": 270.75
+            "liveObjects": 469775,
+            "rssMB": 271.92
           },
           {
             "tick": 10440,
-            "liveObjects": 470002,
-            "rssMB": 270.78
+            "liveObjects": 469958,
+            "rssMB": 271.97
           },
           {
             "tick": 10560,
-            "liveObjects": 470132,
-            "rssMB": 270.8
+            "liveObjects": 470142,
+            "rssMB": 271.98
           },
           {
             "tick": 10680,
-            "liveObjects": 470317,
-            "rssMB": 270.81
+            "liveObjects": 470327,
+            "rssMB": 269.2
           },
           {
             "tick": 10800,
-            "liveObjects": 470447,
-            "rssMB": 270.84
+            "liveObjects": 470457,
+            "rssMB": 269.23
           },
           {
             "tick": 10920,
-            "liveObjects": 470577,
-            "rssMB": 270.86
+            "liveObjects": 470587,
+            "rssMB": 269.25
           },
           {
             "tick": 11040,
-            "liveObjects": 470707,
-            "rssMB": 270.86
+            "liveObjects": 470717,
+            "rssMB": 269.25
           },
           {
             "tick": 11160,
-            "liveObjects": 470893,
-            "rssMB": 270.88
+            "liveObjects": 470903,
+            "rssMB": 269.27
           },
           {
             "tick": 11280,
-            "liveObjects": 471023,
-            "rssMB": 270.89
+            "liveObjects": 471033,
+            "rssMB": 269.28
           },
           {
             "tick": 11400,
-            "liveObjects": 471153,
-            "rssMB": 270.91
+            "liveObjects": 471163,
+            "rssMB": 269.3
           },
           {
             "tick": 11520,
-            "liveObjects": 471283,
-            "rssMB": 270.91
+            "liveObjects": 471293,
+            "rssMB": 269.3
           },
           {
             "tick": 11640,
-            "liveObjects": 471413,
-            "rssMB": 270.92
+            "liveObjects": 471423,
+            "rssMB": 269.31
           },
           {
             "tick": 11760,
-            "liveObjects": 471543,
-            "rssMB": 270.92
+            "liveObjects": 471553,
+            "rssMB": 269.31
           },
           {
             "tick": 11880,
-            "liveObjects": 471673,
-            "rssMB": 270.94
+            "liveObjects": 471683,
+            "rssMB": 269.33
           },
           {
             "tick": 12000,
-            "liveObjects": 471803,
-            "rssMB": 270.95
+            "liveObjects": 471813,
+            "rssMB": 269.34
           },
           {
             "tick": 12120,
-            "liveObjects": 471933,
-            "rssMB": 270.97
+            "liveObjects": 471943,
+            "rssMB": 269.36
           },
           {
             "tick": 12240,
-            "liveObjects": 472063,
-            "rssMB": 270.97
+            "liveObjects": 472073,
+            "rssMB": 269.36
           },
           {
             "tick": 12360,
-            "liveObjects": 472193,
-            "rssMB": 271
+            "liveObjects": 472203,
+            "rssMB": 269.41
           },
           {
             "tick": 12480,
-            "liveObjects": 472323,
-            "rssMB": 271
+            "liveObjects": 472333,
+            "rssMB": 269.41
           },
           {
             "tick": 12600,
-            "liveObjects": 472453,
-            "rssMB": 271.02
+            "liveObjects": 472463,
+            "rssMB": 269.42
           },
           {
             "tick": 12720,
-            "liveObjects": 472583,
-            "rssMB": 271.02
+            "liveObjects": 472593,
+            "rssMB": 269.42
           },
           {
             "tick": 12840,
-            "liveObjects": 472713,
-            "rssMB": 271.03
+            "liveObjects": 472723,
+            "rssMB": 269.44
           },
           {
             "tick": 12960,
-            "liveObjects": 472843,
-            "rssMB": 271.05
+            "liveObjects": 472853,
+            "rssMB": 269.45
           },
           {
             "tick": 13080,
-            "liveObjects": 472973,
-            "rssMB": 267.38
+            "liveObjects": 472983,
+            "rssMB": 269.47
           },
           {
             "tick": 13200,
-            "liveObjects": 473103,
-            "rssMB": 267.38
+            "liveObjects": 473113,
+            "rssMB": 269.47
           },
           {
             "tick": 13320,
-            "liveObjects": 473233,
-            "rssMB": 267.39
+            "liveObjects": 473243,
+            "rssMB": 269.48
           },
           {
             "tick": 13440,
-            "liveObjects": 473363,
-            "rssMB": 267.39
+            "liveObjects": 473373,
+            "rssMB": 269.48
           },
           {
             "tick": 13560,
-            "liveObjects": 473493,
-            "rssMB": 261.69
+            "liveObjects": 473503,
+            "rssMB": 269.5
           },
           {
             "tick": 13680,
-            "liveObjects": 473623,
-            "rssMB": 261.7
+            "liveObjects": 473633,
+            "rssMB": 269.52
           },
           {
             "tick": 13800,
-            "liveObjects": 473753,
-            "rssMB": 261.73
+            "liveObjects": 473763,
+            "rssMB": 269.53
           },
           {
             "tick": 13920,
-            "liveObjects": 473940,
-            "rssMB": 261.75
+            "liveObjects": 473950,
+            "rssMB": 269.53
           },
           {
             "tick": 14040,
-            "liveObjects": 474070,
-            "rssMB": 261.77
+            "liveObjects": 474080,
+            "rssMB": 269.53
           },
           {
             "tick": 14160,
-            "liveObjects": 474200,
-            "rssMB": 261.77
+            "liveObjects": 474210,
+            "rssMB": 269.53
           },
           {
             "tick": 14280,
-            "liveObjects": 474330,
-            "rssMB": 261.77
+            "liveObjects": 474340,
+            "rssMB": 269.53
           },
           {
             "tick": 14400,
-            "liveObjects": 474460,
-            "rssMB": 261.77
+            "liveObjects": 474470,
+            "rssMB": 269.53
           },
           {
             "tick": 14520,
-            "liveObjects": 474590,
-            "rssMB": 261.77
+            "liveObjects": 474600,
+            "rssMB": 269.53
           },
           {
             "tick": 14640,
-            "liveObjects": 474720,
-            "rssMB": 261.78
+            "liveObjects": 474730,
+            "rssMB": 269.53
           },
           {
             "tick": 14760,
-            "liveObjects": 474850,
-            "rssMB": 261.78
+            "liveObjects": 474860,
+            "rssMB": 269.55
           },
           {
             "tick": 14880,
-            "liveObjects": 474980,
-            "rssMB": 261.78
+            "liveObjects": 474990,
+            "rssMB": 269.55
           },
           {
             "tick": 15000,
-            "liveObjects": 475110,
-            "rssMB": 261.78
+            "liveObjects": 475120,
+            "rssMB": 269.55
           },
           {
             "tick": 15120,
-            "liveObjects": 475240,
-            "rssMB": 261.78
+            "liveObjects": 475250,
+            "rssMB": 269.55
           },
           {
             "tick": 15240,
-            "liveObjects": 475370,
-            "rssMB": 261.78
+            "liveObjects": 475380,
+            "rssMB": 269.55
           },
           {
             "tick": 15360,
-            "liveObjects": 475500,
-            "rssMB": 261.78
+            "liveObjects": 475510,
+            "rssMB": 269.55
           },
           {
             "tick": 15480,
-            "liveObjects": 475630,
-            "rssMB": 257.53
+            "liveObjects": 475640,
+            "rssMB": 269.55
           },
           {
             "tick": 15600,
-            "liveObjects": 475760,
-            "rssMB": 256.5
+            "liveObjects": 475770,
+            "rssMB": 269.55
           },
           {
             "tick": 15720,
-            "liveObjects": 475890,
-            "rssMB": 256.52
+            "liveObjects": 475900,
+            "rssMB": 269.55
           },
           {
             "tick": 15840,
-            "liveObjects": 476020,
-            "rssMB": 256.52
+            "liveObjects": 476030,
+            "rssMB": 269.55
           },
           {
             "tick": 15960,
-            "liveObjects": 476150,
-            "rssMB": 256.52
+            "liveObjects": 476160,
+            "rssMB": 269.55
           },
           {
             "tick": 16080,
-            "liveObjects": 476280,
-            "rssMB": 240.8
+            "liveObjects": 476290,
+            "rssMB": 269.56
           },
           {
             "tick": 16200,
-            "liveObjects": 476410,
-            "rssMB": 240.8
+            "liveObjects": 476420,
+            "rssMB": 269.56
           },
           {
             "tick": 16320,
-            "liveObjects": 476540,
-            "rssMB": 240.8
+            "liveObjects": 476550,
+            "rssMB": 269.56
           },
           {
             "tick": 16440,
-            "liveObjects": 476670,
-            "rssMB": 240.8
+            "liveObjects": 476680,
+            "rssMB": 269.56
           },
           {
             "tick": 16560,
-            "liveObjects": 476800,
-            "rssMB": 240.8
+            "liveObjects": 476810,
+            "rssMB": 269.56
           },
           {
             "tick": 16680,
-            "liveObjects": 476930,
-            "rssMB": 240.8
+            "liveObjects": 476940,
+            "rssMB": 269.56
           },
           {
             "tick": 16800,
-            "liveObjects": 477060,
-            "rssMB": 240.8
+            "liveObjects": 477070,
+            "rssMB": 269.56
           },
           {
             "tick": 16920,
-            "liveObjects": 477190,
-            "rssMB": 240.8
+            "liveObjects": 477200,
+            "rssMB": 269.56
           },
           {
             "tick": 17040,
-            "liveObjects": 477320,
-            "rssMB": 240.81
+            "liveObjects": 477330,
+            "rssMB": 269.56
           },
           {
             "tick": 17160,
-            "liveObjects": 477450,
-            "rssMB": 240.81
+            "liveObjects": 477460,
+            "rssMB": 269.58
           },
           {
             "tick": 17280,
-            "liveObjects": 477580,
-            "rssMB": 240.81
+            "liveObjects": 477590,
+            "rssMB": 261.31
           },
           {
             "tick": 17400,
-            "liveObjects": 477710,
-            "rssMB": 240.81
+            "liveObjects": 477720,
+            "rssMB": 245.84
           },
           {
             "tick": 17520,
-            "liveObjects": 477840,
-            "rssMB": 240.81
+            "liveObjects": 477850,
+            "rssMB": 245.84
           },
           {
             "tick": 17640,
-            "liveObjects": 477970,
-            "rssMB": 240.81
+            "liveObjects": 477980,
+            "rssMB": 245.84
           },
           {
             "tick": 17760,
-            "liveObjects": 478100,
-            "rssMB": 240.81
+            "liveObjects": 478110,
+            "rssMB": 245.84
           },
           {
             "tick": 17880,
-            "liveObjects": 478230,
-            "rssMB": 240.81
+            "liveObjects": 478240,
+            "rssMB": 245.84
           },
           {
             "tick": 18000,
-            "liveObjects": 478360,
-            "rssMB": 240.81
+            "liveObjects": 478370,
+            "rssMB": 245.84
           },
           {
             "tick": 18120,
-            "liveObjects": 478490,
-            "rssMB": 240.83
+            "liveObjects": 478500,
+            "rssMB": 245.84
           },
           {
             "tick": 18240,
-            "liveObjects": 478620,
-            "rssMB": 240.83
+            "liveObjects": 478630,
+            "rssMB": 240.06
           },
           {
             "tick": 18360,
-            "liveObjects": 478750,
-            "rssMB": 240.83
+            "liveObjects": 478760,
+            "rssMB": 240.06
           },
           {
             "tick": 18480,
-            "liveObjects": 478880,
-            "rssMB": 240.83
+            "liveObjects": 478890,
+            "rssMB": 240.09
           },
           {
             "tick": 18600,
-            "liveObjects": 479010,
-            "rssMB": 240.83
+            "liveObjects": 479020,
+            "rssMB": 240.09
           },
           {
             "tick": 18720,
-            "liveObjects": 479140,
-            "rssMB": 240.83
+            "liveObjects": 479150,
+            "rssMB": 240.09
           },
           {
             "tick": 18840,
-            "liveObjects": 479270,
-            "rssMB": 240.83
+            "liveObjects": 479280,
+            "rssMB": 238.73
           },
           {
             "tick": 18960,
-            "liveObjects": 479400,
-            "rssMB": 240.83
+            "liveObjects": 479410,
+            "rssMB": 238.73
           },
           {
             "tick": 19080,
-            "liveObjects": 479530,
-            "rssMB": 240.81
+            "liveObjects": 479540,
+            "rssMB": 238.73
           },
           {
             "tick": 19200,
-            "liveObjects": 479660,
-            "rssMB": 240.81
+            "liveObjects": 479670,
+            "rssMB": 238.73
           },
           {
             "tick": 19320,
-            "liveObjects": 479790,
-            "rssMB": 240.81
+            "liveObjects": 479800,
+            "rssMB": 238.73
           },
           {
             "tick": 19440,
-            "liveObjects": 479920,
-            "rssMB": 240.83
+            "liveObjects": 479930,
+            "rssMB": 238.75
           },
           {
             "tick": 19560,
-            "liveObjects": 480050,
-            "rssMB": 240.83
+            "liveObjects": 480060,
+            "rssMB": 238.77
           },
           {
             "tick": 19680,
-            "liveObjects": 480180,
-            "rssMB": 240.83
+            "liveObjects": 480190,
+            "rssMB": 236.16
           },
           {
             "tick": 19800,
-            "liveObjects": 480310,
-            "rssMB": 240.83
+            "liveObjects": 480320,
+            "rssMB": 236.16
           },
           {
             "tick": 19920,
-            "liveObjects": 480440,
-            "rssMB": 240.83
+            "liveObjects": 480450,
+            "rssMB": 236.17
           },
           {
             "tick": 20040,
-            "liveObjects": 480570,
-            "rssMB": 240.83
+            "liveObjects": 480580,
+            "rssMB": 236.17
           },
           {
             "tick": 20160,
-            "liveObjects": 480700,
-            "rssMB": 240.83
+            "liveObjects": 480710,
+            "rssMB": 236.2
           },
           {
             "tick": 20280,
-            "liveObjects": 480830,
-            "rssMB": 240.83
+            "liveObjects": 480840,
+            "rssMB": 236.2
           },
           {
             "tick": 20400,
-            "liveObjects": 480960,
-            "rssMB": 240.83
+            "liveObjects": 480970,
+            "rssMB": 236.22
           },
           {
             "tick": 20520,
-            "liveObjects": 481090,
-            "rssMB": 240.84
+            "liveObjects": 481100,
+            "rssMB": 236.23
           },
           {
             "tick": 20640,
-            "liveObjects": 481220,
-            "rssMB": 240.84
+            "liveObjects": 481230,
+            "rssMB": 236.25
           },
           {
             "tick": 20760,
-            "liveObjects": 481350,
-            "rssMB": 240.84
+            "liveObjects": 481360,
+            "rssMB": 236.25
           },
           {
             "tick": 20880,
-            "liveObjects": 481480,
-            "rssMB": 240.84
+            "liveObjects": 481490,
+            "rssMB": 236.28
           },
           {
             "tick": 21000,
-            "liveObjects": 481610,
-            "rssMB": 240.84
+            "liveObjects": 481620,
+            "rssMB": 236.3
           },
           {
             "tick": 21120,
-            "liveObjects": 481740,
-            "rssMB": 240.84
+            "liveObjects": 481750,
+            "rssMB": 236.31
           },
           {
             "tick": 21240,
-            "liveObjects": 481870,
-            "rssMB": 240.84
+            "liveObjects": 481880,
+            "rssMB": 236.31
           },
           {
             "tick": 21360,
-            "liveObjects": 482000,
-            "rssMB": 240.84
+            "liveObjects": 482010,
+            "rssMB": 236.34
           },
           {
             "tick": 21480,
-            "liveObjects": 482130,
-            "rssMB": 240.84
+            "liveObjects": 482140,
+            "rssMB": 236.34
           },
           {
             "tick": 21600,
-            "liveObjects": 482260,
-            "rssMB": 240.84
+            "liveObjects": 482270,
+            "rssMB": 236.38
           },
           {
             "tick": 21720,
-            "liveObjects": 482390,
-            "rssMB": 240.84
+            "liveObjects": 482400,
+            "rssMB": 236.39
           },
           {
             "tick": 21840,
-            "liveObjects": 482520,
-            "rssMB": 240.86
+            "liveObjects": 482530,
+            "rssMB": 236.41
           },
           {
             "tick": 21960,
-            "liveObjects": 482650,
-            "rssMB": 240.86
+            "liveObjects": 482660,
+            "rssMB": 236.42
           },
           {
             "tick": 22080,
-            "liveObjects": 482780,
-            "rssMB": 240.86
+            "liveObjects": 482790,
+            "rssMB": 236.44
           },
           {
             "tick": 22200,
-            "liveObjects": 482910,
-            "rssMB": 240.86
+            "liveObjects": 482920,
+            "rssMB": 236.44
           },
           {
             "tick": 22320,
-            "liveObjects": 483040,
-            "rssMB": 240.86
+            "liveObjects": 483050,
+            "rssMB": 236.45
           },
           {
             "tick": 22440,
-            "liveObjects": 483170,
-            "rssMB": 240.86
+            "liveObjects": 483180,
+            "rssMB": 236.47
           },
           {
             "tick": 22560,
-            "liveObjects": 483300,
-            "rssMB": 240.86
+            "liveObjects": 483310,
+            "rssMB": 236.5
           },
           {
             "tick": 22680,
-            "liveObjects": 483430,
-            "rssMB": 240.86
+            "liveObjects": 483440,
+            "rssMB": 236.5
           },
           {
             "tick": 22800,
-            "liveObjects": 483560,
-            "rssMB": 240.86
+            "liveObjects": 483570,
+            "rssMB": 236.52
           },
           {
             "tick": 22920,
-            "liveObjects": 483690,
-            "rssMB": 240.86
+            "liveObjects": 483700,
+            "rssMB": 236.52
           },
           {
             "tick": 23040,
-            "liveObjects": 483820,
-            "rssMB": 240.86
+            "liveObjects": 483830,
+            "rssMB": 236.53
           },
           {
             "tick": 23160,
-            "liveObjects": 483950,
-            "rssMB": 240.88
+            "liveObjects": 483960,
+            "rssMB": 236.53
           },
           {
             "tick": 23280,
-            "liveObjects": 484080,
-            "rssMB": 240.88
+            "liveObjects": 484090,
+            "rssMB": 236.58
           },
           {
             "tick": 23400,
-            "liveObjects": 484210,
-            "rssMB": 238.19
+            "liveObjects": 484220,
+            "rssMB": 236.58
           },
           {
             "tick": 23520,
-            "liveObjects": 484340,
-            "rssMB": 238.19
+            "liveObjects": 484350,
+            "rssMB": 236.59
           },
           {
             "tick": 23640,
-            "liveObjects": 484470,
-            "rssMB": 238.19
+            "liveObjects": 484480,
+            "rssMB": 236.59
           },
           {
             "tick": 23760,
-            "liveObjects": 484600,
-            "rssMB": 238.19
+            "liveObjects": 484610,
+            "rssMB": 236.63
           },
           {
             "tick": 23880,
-            "liveObjects": 484730,
-            "rssMB": 238.19
+            "liveObjects": 484740,
+            "rssMB": 236.63
           },
           {
             "tick": 24000,
-            "liveObjects": 484860,
-            "rssMB": 238.19
+            "liveObjects": 484870,
+            "rssMB": 236.64
           },
           {
             "tick": 24120,
-            "liveObjects": 484990,
-            "rssMB": 238.19
+            "liveObjects": 485000,
+            "rssMB": 236.64
           },
           {
             "tick": 24240,
-            "liveObjects": 485120,
-            "rssMB": 238.2
+            "liveObjects": 485130,
+            "rssMB": 236.66
           },
           {
             "tick": 24360,
-            "liveObjects": 485250,
-            "rssMB": 238.2
+            "liveObjects": 485260,
+            "rssMB": 236.67
           },
           {
             "tick": 24480,
-            "liveObjects": 485380,
-            "rssMB": 238.2
+            "liveObjects": 485390,
+            "rssMB": 235.14
           },
           {
             "tick": 24600,
-            "liveObjects": 485510,
-            "rssMB": 238.2
+            "liveObjects": 485520,
+            "rssMB": 235.16
           },
           {
             "tick": 24720,
-            "liveObjects": 485640,
-            "rssMB": 238.2
+            "liveObjects": 485650,
+            "rssMB": 235.17
           },
           {
             "tick": 24840,
-            "liveObjects": 485770,
-            "rssMB": 238.2
+            "liveObjects": 485780,
+            "rssMB": 235.19
           },
           {
             "tick": 24960,
-            "liveObjects": 485900,
-            "rssMB": 238.2
+            "liveObjects": 485910,
+            "rssMB": 235.2
           },
           {
             "tick": 25080,
-            "liveObjects": 486030,
-            "rssMB": 238.2
+            "liveObjects": 486040,
+            "rssMB": 235.2
           },
           {
             "tick": 25200,
-            "liveObjects": 486160,
-            "rssMB": 238.2
+            "liveObjects": 486170,
+            "rssMB": 232.52
           },
           {
             "tick": 25320,
-            "liveObjects": 486290,
-            "rssMB": 238.22
+            "liveObjects": 486300,
+            "rssMB": 232.53
           },
           {
             "tick": 25440,
-            "liveObjects": 486420,
-            "rssMB": 238.22
+            "liveObjects": 486430,
+            "rssMB": 232.53
           },
           {
             "tick": 25560,
-            "liveObjects": 486550,
-            "rssMB": 238.22
+            "liveObjects": 486560,
+            "rssMB": 232.55
           },
           {
             "tick": 25680,
-            "liveObjects": 486680,
-            "rssMB": 238.22
+            "liveObjects": 486690,
+            "rssMB": 232.56
           },
           {
             "tick": 25800,
-            "liveObjects": 486810,
-            "rssMB": 238.22
+            "liveObjects": 486820,
+            "rssMB": 232.59
           },
           {
             "tick": 25920,
-            "liveObjects": 486940,
-            "rssMB": 238.22
+            "liveObjects": 486950,
+            "rssMB": 232.61
           },
           {
             "tick": 26040,
-            "liveObjects": 487070,
-            "rssMB": 238.22
+            "liveObjects": 487080,
+            "rssMB": 232.63
           },
           {
             "tick": 26160,
-            "liveObjects": 487200,
-            "rssMB": 238.22
+            "liveObjects": 487210,
+            "rssMB": 232.63
           },
           {
             "tick": 26280,
-            "liveObjects": 487330,
-            "rssMB": 238.22
+            "liveObjects": 487340,
+            "rssMB": 232.64
           },
           {
             "tick": 26400,
-            "liveObjects": 487460,
-            "rssMB": 238.22
+            "liveObjects": 487470,
+            "rssMB": 232.66
           },
           {
             "tick": 26520,
-            "liveObjects": 487590,
-            "rssMB": 238.22
+            "liveObjects": 487600,
+            "rssMB": 232.67
           },
           {
             "tick": 26640,
-            "liveObjects": 487720,
-            "rssMB": 238.23
+            "liveObjects": 487730,
+            "rssMB": 232.69
           },
           {
             "tick": 26760,
-            "liveObjects": 487850,
-            "rssMB": 238.23
+            "liveObjects": 487860,
+            "rssMB": 232.73
           },
           {
             "tick": 26880,
-            "liveObjects": 487980,
-            "rssMB": 238.23
+            "liveObjects": 487990,
+            "rssMB": 232.73
           },
           {
             "tick": 27000,
-            "liveObjects": 488110,
-            "rssMB": 238.23
+            "liveObjects": 488120,
+            "rssMB": 223.73
           },
           {
             "tick": 27120,
-            "liveObjects": 488240,
-            "rssMB": 238.23
+            "liveObjects": 488250,
+            "rssMB": 223.73
           },
           {
             "tick": 27240,
-            "liveObjects": 488370,
-            "rssMB": 238.23
+            "liveObjects": 488380,
+            "rssMB": 223.75
           },
           {
             "tick": 27360,
-            "liveObjects": 488500,
-            "rssMB": 238.23
+            "liveObjects": 488510,
+            "rssMB": 223.75
           },
           {
             "tick": 27480,
-            "liveObjects": 488630,
-            "rssMB": 238.23
+            "liveObjects": 488640,
+            "rssMB": 223.77
           },
           {
             "tick": 27600,
-            "liveObjects": 488760,
-            "rssMB": 238.23
+            "liveObjects": 488770,
+            "rssMB": 223.78
           },
           {
             "tick": 27720,
-            "liveObjects": 488891,
-            "rssMB": 238.28
+            "liveObjects": 488900,
+            "rssMB": 223.8
           },
           {
             "tick": 27840,
-            "liveObjects": 489021,
-            "rssMB": 238.28
+            "liveObjects": 489030,
+            "rssMB": 223.8
           },
           {
             "tick": 27960,
-            "liveObjects": 489151,
-            "rssMB": 238.28
+            "liveObjects": 489160,
+            "rssMB": 223.83
           },
           {
             "tick": 28080,
-            "liveObjects": 489281,
-            "rssMB": 238.28
+            "liveObjects": 489290,
+            "rssMB": 223.88
           },
           {
             "tick": 28200,
-            "liveObjects": 489411,
-            "rssMB": 238.28
+            "liveObjects": 489420,
+            "rssMB": 223.89
           },
           {
             "tick": 28320,
-            "liveObjects": 489541,
-            "rssMB": 238.28
+            "liveObjects": 489550,
+            "rssMB": 223.89
           },
           {
             "tick": 28440,
-            "liveObjects": 489671,
-            "rssMB": 238.28
+            "liveObjects": 489680,
+            "rssMB": 223.92
           },
           {
             "tick": 28560,
-            "liveObjects": 489801,
-            "rssMB": 238.28
+            "liveObjects": 489810,
+            "rssMB": 223.92
           },
           {
             "tick": 28680,
-            "liveObjects": 489931,
-            "rssMB": 238.28
+            "liveObjects": 489941,
+            "rssMB": 225.23
           },
           {
             "tick": 28800,
-            "liveObjects": 490061,
-            "rssMB": 238.28
+            "liveObjects": 490071,
+            "rssMB": 225.23
           },
           {
             "tick": 28920,
-            "liveObjects": 490191,
-            "rssMB": 238.28
+            "liveObjects": 490201,
+            "rssMB": 225.23
           },
           {
             "tick": 29040,
-            "liveObjects": 490321,
-            "rssMB": 238.3
+            "liveObjects": 490331,
+            "rssMB": 225.25
           },
           {
             "tick": 29160,
-            "liveObjects": 490451,
-            "rssMB": 238.3
+            "liveObjects": 490461,
+            "rssMB": 225.25
           },
           {
             "tick": 29280,
-            "liveObjects": 490581,
-            "rssMB": 238.3
+            "liveObjects": 490591,
+            "rssMB": 225.25
           },
           {
             "tick": 29400,
-            "liveObjects": 490711,
-            "rssMB": 238.31
+            "liveObjects": 490721,
+            "rssMB": 225.25
           },
           {
             "tick": 29520,
-            "liveObjects": 490841,
-            "rssMB": 238.31
+            "liveObjects": 490851,
+            "rssMB": 225.25
           },
           {
             "tick": 29640,
-            "liveObjects": 490971,
-            "rssMB": 238.31
+            "liveObjects": 490981,
+            "rssMB": 225.25
           },
           {
             "tick": 29760,
-            "liveObjects": 491101,
-            "rssMB": 238.31
+            "liveObjects": 491111,
+            "rssMB": 225.25
           },
           {
             "tick": 29880,
-            "liveObjects": 491231,
-            "rssMB": 206.91
+            "liveObjects": 491241,
+            "rssMB": 225.25
           },
           {
             "tick": 30000,
-            "liveObjects": 491361,
-            "rssMB": 170.95
+            "liveObjects": 491371,
+            "rssMB": 225.25
           },
           {
             "tick": 30120,
-            "liveObjects": 491491,
-            "rssMB": 170.97
+            "liveObjects": 491501,
+            "rssMB": 225.27
           },
           {
             "tick": 30240,
-            "liveObjects": 491621,
-            "rssMB": 170.98
+            "liveObjects": 491631,
+            "rssMB": 225.27
           },
           {
             "tick": 30360,
-            "liveObjects": 491751,
-            "rssMB": 171
+            "liveObjects": 491761,
+            "rssMB": 225.27
           },
           {
             "tick": 30480,
-            "liveObjects": 491881,
-            "rssMB": 171
+            "liveObjects": 491891,
+            "rssMB": 225.27
           },
           {
             "tick": 30600,
-            "liveObjects": 492011,
-            "rssMB": 171.02
+            "liveObjects": 492021,
+            "rssMB": 225.27
           },
           {
             "tick": 30720,
-            "liveObjects": 492141,
-            "rssMB": 171.03
+            "liveObjects": 492151,
+            "rssMB": 225.27
           },
           {
             "tick": 30840,
-            "liveObjects": 492271,
-            "rssMB": 167.92
+            "liveObjects": 492281,
+            "rssMB": 225.3
           },
           {
             "tick": 30960,
-            "liveObjects": 492401,
-            "rssMB": 165.52
+            "liveObjects": 492411,
+            "rssMB": 208.48
           },
           {
             "tick": 31080,
-            "liveObjects": 492531,
-            "rssMB": 165.52
+            "liveObjects": 492541,
+            "rssMB": 194.08
           },
           {
             "tick": 31200,
-            "liveObjects": 492661,
-            "rssMB": 165.52
+            "liveObjects": 492671,
+            "rssMB": 194.08
           },
           {
             "tick": 31320,
-            "liveObjects": 492791,
-            "rssMB": 165.52
+            "liveObjects": 492801,
+            "rssMB": 192.48
           },
           {
             "tick": 31440,
-            "liveObjects": 492921,
-            "rssMB": 165.52
+            "liveObjects": 492931,
+            "rssMB": 192.42
           },
           {
             "tick": 31560,
-            "liveObjects": 493051,
-            "rssMB": 165.52
+            "liveObjects": 493061,
+            "rssMB": 192.42
           },
           {
             "tick": 31680,
-            "liveObjects": 493181,
-            "rssMB": 165.52
+            "liveObjects": 493191,
+            "rssMB": 192.42
           },
           {
             "tick": 31800,
-            "liveObjects": 493311,
-            "rssMB": 165.52
+            "liveObjects": 493321,
+            "rssMB": 192.42
           },
           {
             "tick": 31920,
-            "liveObjects": 493441,
-            "rssMB": 165.52
+            "liveObjects": 493451,
+            "rssMB": 192.25
           },
           {
             "tick": 32040,
-            "liveObjects": 493571,
-            "rssMB": 165.52
+            "liveObjects": 493581,
+            "rssMB": 192.25
           },
           {
             "tick": 32160,
-            "liveObjects": 493701,
-            "rssMB": 165.52
+            "liveObjects": 493711,
+            "rssMB": 192.09
           },
           {
             "tick": 32280,
-            "liveObjects": 493831,
-            "rssMB": 165.52
+            "liveObjects": 493841,
+            "rssMB": 192.09
           },
           {
             "tick": 32400,
-            "liveObjects": 493961,
-            "rssMB": 165.53
+            "liveObjects": 493971,
+            "rssMB": 192.11
           },
           {
             "tick": 32520,
-            "liveObjects": 494091,
-            "rssMB": 165.53
+            "liveObjects": 494101,
+            "rssMB": 190.58
           },
           {
             "tick": 32640,
-            "liveObjects": 494221,
-            "rssMB": 165.53
+            "liveObjects": 494231,
+            "rssMB": 190.58
           },
           {
             "tick": 32760,
-            "liveObjects": 494351,
-            "rssMB": 165.53
+            "liveObjects": 494361,
+            "rssMB": 190.58
           },
           {
             "tick": 32880,
-            "liveObjects": 494481,
-            "rssMB": 165.55
+            "liveObjects": 494491,
+            "rssMB": 190.59
           },
           {
             "tick": 33000,
-            "liveObjects": 494611,
-            "rssMB": 165.55
+            "liveObjects": 494621,
+            "rssMB": 189.7
           },
           {
             "tick": 33120,
-            "liveObjects": 494741,
-            "rssMB": 165.55
+            "liveObjects": 494751,
+            "rssMB": 189.7
           },
           {
             "tick": 33240,
-            "liveObjects": 494871,
-            "rssMB": 165.55
+            "liveObjects": 494881,
+            "rssMB": 189.72
           },
           {
             "tick": 33360,
-            "liveObjects": 495001,
-            "rssMB": 165.55
+            "liveObjects": 495011,
+            "rssMB": 189.72
           },
           {
             "tick": 33480,
-            "liveObjects": 495131,
-            "rssMB": 165.56
+            "liveObjects": 495141,
+            "rssMB": 189.75
           },
           {
             "tick": 33600,
-            "liveObjects": 495261,
-            "rssMB": 165.56
+            "liveObjects": 495271,
+            "rssMB": 189.75
           },
           {
             "tick": 33720,
-            "liveObjects": 495391,
-            "rssMB": 165.56
+            "liveObjects": 495401,
+            "rssMB": 189.77
           },
           {
             "tick": 33840,
-            "liveObjects": 495521,
-            "rssMB": 165.56
+            "liveObjects": 495531,
+            "rssMB": 189.78
           },
           {
             "tick": 33960,
-            "liveObjects": 495651,
-            "rssMB": 165.56
+            "liveObjects": 495661,
+            "rssMB": 189.8
           },
           {
             "tick": 34080,
-            "liveObjects": 495781,
-            "rssMB": 165.56
+            "liveObjects": 495791,
+            "rssMB": 189.8
           },
           {
             "tick": 34200,
-            "liveObjects": 495911,
-            "rssMB": 165.56
+            "liveObjects": 495921,
+            "rssMB": 189.83
           },
           {
             "tick": 34320,
-            "liveObjects": 496041,
-            "rssMB": 165.56
+            "liveObjects": 496051,
+            "rssMB": 187.72
           },
           {
             "tick": 34440,
-            "liveObjects": 496171,
-            "rssMB": 165.56
+            "liveObjects": 496181,
+            "rssMB": 187.75
           },
           {
             "tick": 34560,
-            "liveObjects": 496301,
-            "rssMB": 165.56
+            "liveObjects": 496311,
+            "rssMB": 187.77
           },
           {
             "tick": 34680,
-            "liveObjects": 496431,
-            "rssMB": 165.56
+            "liveObjects": 496441,
+            "rssMB": 187.78
           },
           {
             "tick": 34800,
-            "liveObjects": 496561,
-            "rssMB": 165.58
+            "liveObjects": 496571,
+            "rssMB": 187.8
           },
           {
             "tick": 34920,
-            "liveObjects": 496691,
-            "rssMB": 165.59
+            "liveObjects": 496701,
+            "rssMB": 187.83
           },
           {
             "tick": 35040,
-            "liveObjects": 496821,
-            "rssMB": 165.59
+            "liveObjects": 496831,
+            "rssMB": 187.83
           },
           {
             "tick": 35160,
-            "liveObjects": 496951,
-            "rssMB": 165.59
+            "liveObjects": 496961,
+            "rssMB": 187.84
           },
           {
             "tick": 35280,
-            "liveObjects": 497081,
-            "rssMB": 165.59
+            "liveObjects": 497091,
+            "rssMB": 187.84
           },
           {
             "tick": 35400,
-            "liveObjects": 497211,
-            "rssMB": 165.59
+            "liveObjects": 497221,
+            "rssMB": 186.36
           },
           {
             "tick": 35520,
-            "liveObjects": 497341,
-            "rssMB": 165.59
+            "liveObjects": 497351,
+            "rssMB": 182.44
           },
           {
             "tick": 35640,
-            "liveObjects": 497471,
-            "rssMB": 165.59
+            "liveObjects": 497481,
+            "rssMB": 182.44
           },
           {
             "tick": 35760,
-            "liveObjects": 497601,
-            "rssMB": 165.59
+            "liveObjects": 497611,
+            "rssMB": 175.56
           },
           {
             "tick": 35880,
-            "liveObjects": 497731,
-            "rssMB": 165.61
+            "liveObjects": 497741,
+            "rssMB": 173.98
           },
           {
             "tick": 36000,
-            "liveObjects": 497861,
-            "rssMB": 165.61
+            "liveObjects": 497871,
+            "rssMB": 173.92
           },
           {
             "tick": 36120,
-            "liveObjects": 497991,
-            "rssMB": 165.61
+            "liveObjects": 498001,
+            "rssMB": 173.92
           },
           {
             "tick": 36240,
-            "liveObjects": 498121,
-            "rssMB": 165.61
+            "liveObjects": 498131,
+            "rssMB": 173.94
           },
           {
             "tick": 36360,
-            "liveObjects": 498251,
-            "rssMB": 165.61
+            "liveObjects": 498261,
+            "rssMB": 173.94
           },
           {
             "tick": 36480,
-            "liveObjects": 498381,
-            "rssMB": 165.61
+            "liveObjects": 498391,
+            "rssMB": 173.95
           },
           {
             "tick": 36600,
-            "liveObjects": 498511,
-            "rssMB": 165.61
+            "liveObjects": 498521,
+            "rssMB": 173.95
           },
           {
             "tick": 36720,
-            "liveObjects": 498641,
-            "rssMB": 165.61
+            "liveObjects": 498651,
+            "rssMB": 173.98
           },
           {
             "tick": 36840,
-            "liveObjects": 498771,
-            "rssMB": 165.61
+            "liveObjects": 498781,
+            "rssMB": 173.98
           },
           {
             "tick": 36960,
-            "liveObjects": 498901,
-            "rssMB": 165.63
+            "liveObjects": 498911,
+            "rssMB": 174.03
           },
           {
             "tick": 37080,
-            "liveObjects": 499031,
-            "rssMB": 165.63
+            "liveObjects": 499041,
+            "rssMB": 174.03
           },
           {
             "tick": 37200,
-            "liveObjects": 499161,
-            "rssMB": 165.64
+            "liveObjects": 499171,
+            "rssMB": 174.06
           },
           {
             "tick": 37320,
-            "liveObjects": 499291,
-            "rssMB": 165.64
+            "liveObjects": 499301,
+            "rssMB": 174.08
           },
           {
             "tick": 37440,
-            "liveObjects": 499421,
-            "rssMB": 165.64
+            "liveObjects": 499431,
+            "rssMB": 174.09
           },
           {
             "tick": 37560,
-            "liveObjects": 499551,
-            "rssMB": 165.64
+            "liveObjects": 499561,
+            "rssMB": 174.09
           },
           {
             "tick": 37680,
-            "liveObjects": 499681,
-            "rssMB": 165.64
+            "liveObjects": 499691,
+            "rssMB": 174.11
           },
           {
             "tick": 37800,
-            "liveObjects": 499811,
-            "rssMB": 165.66
+            "liveObjects": 499821,
+            "rssMB": 174.11
           },
           {
             "tick": 37920,
-            "liveObjects": 499941,
-            "rssMB": 165.66
+            "liveObjects": 499951,
+            "rssMB": 174.13
           },
           {
             "tick": 38040,
-            "liveObjects": 500071,
-            "rssMB": 165.66
+            "liveObjects": 500081,
+            "rssMB": 174.06
           },
           {
             "tick": 38160,
-            "liveObjects": 500201,
-            "rssMB": 165.66
+            "liveObjects": 500211,
+            "rssMB": 174.08
           },
           {
             "tick": 38280,
-            "liveObjects": 500331,
-            "rssMB": 165.67
+            "liveObjects": 500341,
+            "rssMB": 174.11
           },
           {
             "tick": 38400,
-            "liveObjects": 500461,
-            "rssMB": 165.67
+            "liveObjects": 500471,
+            "rssMB": 174.13
           },
           {
             "tick": 38520,
-            "liveObjects": 500591,
-            "rssMB": 165.67
+            "liveObjects": 500601,
+            "rssMB": 174.13
           },
           {
             "tick": 38640,
-            "liveObjects": 500721,
-            "rssMB": 165.67
+            "liveObjects": 500731,
+            "rssMB": 174.14
           },
           {
             "tick": 38760,
-            "liveObjects": 500851,
-            "rssMB": 165.67
+            "liveObjects": 500861,
+            "rssMB": 172.77
           },
           {
             "tick": 38880,
-            "liveObjects": 500981,
-            "rssMB": 165.67
+            "liveObjects": 500991,
+            "rssMB": 172.81
           },
           {
             "tick": 39000,
-            "liveObjects": 501111,
-            "rssMB": 165.69
+            "liveObjects": 501121,
+            "rssMB": 172.83
           },
           {
             "tick": 39120,
-            "liveObjects": 501241,
-            "rssMB": 165.69
+            "liveObjects": 501251,
+            "rssMB": 172.84
           },
           {
             "tick": 39240,
-            "liveObjects": 501371,
-            "rssMB": 165.69
+            "liveObjects": 501381,
+            "rssMB": 172.84
           },
           {
             "tick": 39360,
-            "liveObjects": 501501,
-            "rssMB": 165.69
+            "liveObjects": 501511,
+            "rssMB": 172.86
           },
           {
             "tick": 39480,
-            "liveObjects": 501631,
-            "rssMB": 165.69
+            "liveObjects": 501641,
+            "rssMB": 172.86
           },
           {
             "tick": 39600,
-            "liveObjects": 501761,
-            "rssMB": 165.72
+            "liveObjects": 501771,
+            "rssMB": 172.89
           },
           {
             "tick": 39720,
-            "liveObjects": 501891,
-            "rssMB": 165.72
+            "liveObjects": 501901,
+            "rssMB": 172.89
           },
           {
             "tick": 39840,
-            "liveObjects": 502021,
-            "rssMB": 165.73
+            "liveObjects": 502031,
+            "rssMB": 172.91
           },
           {
             "tick": 39960,
-            "liveObjects": 502151,
-            "rssMB": 165.73
+            "liveObjects": 502161,
+            "rssMB": 172.91
           },
           {
             "tick": 40080,
-            "liveObjects": 502281,
-            "rssMB": 165.77
+            "liveObjects": 502291,
+            "rssMB": 172.94
           },
           {
             "tick": 40200,
-            "liveObjects": 502411,
-            "rssMB": 165.78
+            "liveObjects": 502421,
+            "rssMB": 172.95
           },
           {
             "tick": 40320,
-            "liveObjects": 502541,
-            "rssMB": 165.8
+            "liveObjects": 502551,
+            "rssMB": 172.97
           },
           {
             "tick": 40440,
-            "liveObjects": 502671,
-            "rssMB": 165.81
+            "liveObjects": 502681,
+            "rssMB": 172.98
           },
           {
             "tick": 40560,
-            "liveObjects": 502801,
-            "rssMB": 165.83
+            "liveObjects": 502811,
+            "rssMB": 173
           },
           {
             "tick": 40680,
-            "liveObjects": 502931,
-            "rssMB": 165.83
+            "liveObjects": 502941,
+            "rssMB": 173.02
           },
           {
             "tick": 40800,
-            "liveObjects": 503061,
-            "rssMB": 165.84
+            "liveObjects": 503071,
+            "rssMB": 173.03
           },
           {
             "tick": 40920,
-            "liveObjects": 503191,
-            "rssMB": 165.86
+            "liveObjects": 503201,
+            "rssMB": 173.03
           },
           {
             "tick": 41040,
-            "liveObjects": 503321,
-            "rssMB": 165.91
+            "liveObjects": 503331,
+            "rssMB": 173.08
           },
           {
             "tick": 41160,
-            "liveObjects": 503451,
-            "rssMB": 165.92
+            "liveObjects": 503461,
+            "rssMB": 173.09
           },
           {
             "tick": 41280,
-            "liveObjects": 503581,
-            "rssMB": 165.94
+            "liveObjects": 503591,
+            "rssMB": 173.11
           },
           {
             "tick": 41400,
-            "liveObjects": 503711,
-            "rssMB": 165.94
+            "liveObjects": 503721,
+            "rssMB": 173.11
           },
           {
             "tick": 41520,
-            "liveObjects": 503841,
-            "rssMB": 165.95
+            "liveObjects": 503851,
+            "rssMB": 173.13
           },
           {
             "tick": 41640,
-            "liveObjects": 503971,
-            "rssMB": 165.95
+            "liveObjects": 503981,
+            "rssMB": 173.13
           },
           {
             "tick": 41760,
-            "liveObjects": 504101,
-            "rssMB": 165.97
+            "liveObjects": 504111,
+            "rssMB": 173.14
           },
           {
             "tick": 41880,
-            "liveObjects": 504231,
-            "rssMB": 165.97
+            "liveObjects": 504241,
+            "rssMB": 173.16
           },
           {
             "tick": 42000,
-            "liveObjects": 504361,
-            "rssMB": 166.02
+            "liveObjects": 504371,
+            "rssMB": 173.2
           },
           {
             "tick": 42120,
-            "liveObjects": 504491,
-            "rssMB": 166.02
+            "liveObjects": 504501,
+            "rssMB": 173.2
           },
           {
             "tick": 42240,
-            "liveObjects": 504621,
-            "rssMB": 166.03
+            "liveObjects": 504631,
+            "rssMB": 173.22
           },
           {
             "tick": 42360,
-            "liveObjects": 504751,
-            "rssMB": 166.03
+            "liveObjects": 504761,
+            "rssMB": 173.22
           },
           {
             "tick": 42480,
-            "liveObjects": 504881,
-            "rssMB": 166.06
+            "liveObjects": 504891,
+            "rssMB": 173.22
           },
           {
             "tick": 42600,
-            "liveObjects": 505011,
-            "rssMB": 166.05
+            "liveObjects": 505021,
+            "rssMB": 173.17
           },
           {
             "tick": 42720,
-            "liveObjects": 505141,
-            "rssMB": 166
+            "liveObjects": 505151,
+            "rssMB": 173.19
           },
           {
             "tick": 42840,
-            "liveObjects": 505271,
-            "rssMB": 166
+            "liveObjects": 505281,
+            "rssMB": 173.19
           }
-        ]
+        ],
+        "totalCompileTimeMsDelta": 0
       }
     ],
     "b9": [
       {
         "name": "b9-js-cap10000",
-        "ticksCompleted": 113115,
+        "ticksCompleted": 113321,
         "meanTickMs": 0.0171,
-        "stdDevTickMs": 0.0046,
+        "stdDevTickMs": 0.005,
         "p50TickMs": 0.0166,
-        "p99TickMs": 0.0268,
-        "p999TickMs": 0.0656,
-        "maxTickMs": 0.2925,
+        "p99TickMs": 0.0288,
+        "p999TickMs": 0.0676,
+        "maxTickMs": 0.3904,
         "allocationDelta": null,
         "heapSizeMB": 38.43,
-        "rssMB": 215.72,
-        "cpuUserUs": 1990500,
-        "cpuSystemUs": 72579,
-        "cpuTotalUs": 2063079,
-        "dfgCompilesDelta": null,
+        "rssMB": 152.33,
+        "cpuUserUs": 2008746,
+        "cpuSystemUs": 62796,
+        "cpuTotalUs": 2071542,
+        "dfgCompilesDelta": 1,
         "ftlCompilesDelta": null,
         "osrExitsDelta": null,
-        "highWaterRssMB": 215.72,
+        "highWaterRssMB": 190.63,
         "heapTimeSeries": null,
+        "totalCompileTimeMsDelta": 0,
         "capacity": 10000
       },
       {
         "name": "b9-rigid-cap10000",
-        "ticksCompleted": 48793,
-        "meanTickMs": 0.0404,
-        "stdDevTickMs": 0.0043,
-        "p50TickMs": 0.0394,
-        "p99TickMs": 0.0555,
-        "p999TickMs": 0.1014,
-        "maxTickMs": 0.156,
+        "ticksCompleted": 43400,
+        "meanTickMs": 0.0452,
+        "stdDevTickMs": 0.0708,
+        "p50TickMs": 0.0399,
+        "p99TickMs": 0.1244,
+        "p999TickMs": 0.3982,
+        "maxTickMs": 9.4475,
         "allocationDelta": null,
         "heapSizeMB": 38.29,
-        "rssMB": 468.03,
-        "cpuUserUs": 2028135,
-        "cpuSystemUs": 43193,
-        "cpuTotalUs": 2071328,
-        "dfgCompilesDelta": null,
+        "rssMB": 117,
+        "cpuUserUs": 1879937,
+        "cpuSystemUs": 73016,
+        "cpuTotalUs": 1952953,
+        "dfgCompilesDelta": 2,
         "ftlCompilesDelta": null,
         "osrExitsDelta": null,
-        "highWaterRssMB": 531.83,
+        "highWaterRssMB": 160.69,
         "heapTimeSeries": null,
+        "totalCompileTimeMsDelta": 0,
         "capacity": 10000
       },
       {
         "name": "b9-js-cap100000",
-        "ticksCompleted": 9851,
-        "meanTickMs": 0.2023,
-        "stdDevTickMs": 0.0398,
-        "p50TickMs": 0.1921,
-        "p99TickMs": 0.3491,
-        "p999TickMs": 0.7141,
-        "maxTickMs": 1.0568,
+        "ticksCompleted": 7522,
+        "meanTickMs": 0.2646,
+        "stdDevTickMs": 0.4973,
+        "p50TickMs": 0.201,
+        "p99TickMs": 1.3615,
+        "p999TickMs": 7.3858,
+        "maxTickMs": 23.9733,
         "allocationDelta": null,
         "heapSizeMB": 45.96,
-        "rssMB": 275.97,
-        "cpuUserUs": 2056600,
-        "cpuSystemUs": 31699,
-        "cpuTotalUs": 2088299,
-        "dfgCompilesDelta": null,
+        "rssMB": 186.78,
+        "cpuUserUs": 1730828,
+        "cpuSystemUs": 70614,
+        "cpuTotalUs": 1801442,
+        "dfgCompilesDelta": 1,
         "ftlCompilesDelta": null,
         "osrExitsDelta": null,
-        "highWaterRssMB": 275.97,
+        "highWaterRssMB": 203.61,
         "heapTimeSeries": null,
+        "totalCompileTimeMsDelta": 0,
         "capacity": 100000
       },
       {
         "name": "b9-rigid-cap100000",
-        "ticksCompleted": 4433,
-        "meanTickMs": 0.45,
-        "stdDevTickMs": 0.1322,
-        "p50TickMs": 0.4231,
-        "p99TickMs": 1.1593,
-        "p999TickMs": 2.0743,
-        "maxTickMs": 3.5105,
+        "ticksCompleted": 4214,
+        "meanTickMs": 0.473,
+        "stdDevTickMs": 0.2008,
+        "p50TickMs": 0.4307,
+        "p99TickMs": 1.076,
+        "p999TickMs": 2.7055,
+        "maxTickMs": 7.4951,
         "allocationDelta": null,
         "heapSizeMB": 44.34,
-        "rssMB": 169.78,
-        "cpuUserUs": 1983664,
-        "cpuSystemUs": 29094,
-        "cpuTotalUs": 2012758,
-        "dfgCompilesDelta": null,
+        "rssMB": 120.55,
+        "cpuUserUs": 1964304,
+        "cpuSystemUs": 36930,
+        "cpuTotalUs": 2001234,
+        "dfgCompilesDelta": 1,
         "ftlCompilesDelta": null,
         "osrExitsDelta": null,
-        "highWaterRssMB": 465.64,
+        "highWaterRssMB": 130.23,
         "heapTimeSeries": null,
+        "totalCompileTimeMsDelta": 0,
         "capacity": 100000
       },
       {
         "name": "b9-js-cap1000000",
-        "ticksCompleted": 782,
-        "meanTickMs": 2.5549,
-        "stdDevTickMs": 0.5864,
-        "p50TickMs": 2.5061,
-        "p99TickMs": 4.0908,
-        "p999TickMs": 8.8014,
-        "maxTickMs": 8.8014,
+        "ticksCompleted": 662,
+        "meanTickMs": 3.0284,
+        "stdDevTickMs": 5.1651,
+        "p50TickMs": 2.6271,
+        "p99TickMs": 9.7338,
+        "p999TickMs": 129.4024,
+        "maxTickMs": 129.4024,
         "allocationDelta": null,
         "heapSizeMB": 121.42,
-        "rssMB": 526.14,
-        "cpuUserUs": 2192457,
-        "cpuSystemUs": 69549,
-        "cpuTotalUs": 2262006,
-        "dfgCompilesDelta": null,
+        "rssMB": 209.67,
+        "cpuUserUs": 1983352,
+        "cpuSystemUs": 113768,
+        "cpuTotalUs": 2097120,
+        "dfgCompilesDelta": 0,
         "ftlCompilesDelta": null,
         "osrExitsDelta": null,
-        "highWaterRssMB": 558.25,
+        "highWaterRssMB": 567.05,
         "heapTimeSeries": null,
+        "totalCompileTimeMsDelta": 0,
         "capacity": 1000000
       },
       {
         "name": "b9-rigid-cap1000000",
-        "ticksCompleted": 462,
-        "meanTickMs": 4.3336,
-        "stdDevTickMs": 0.2866,
-        "p50TickMs": 4.2528,
-        "p99TickMs": 5.939,
-        "p999TickMs": 7.1,
-        "maxTickMs": 7.1,
+        "ticksCompleted": 453,
+        "meanTickMs": 4.4142,
+        "stdDevTickMs": 0.286,
+        "p50TickMs": 4.3485,
+        "p99TickMs": 5.9653,
+        "p999TickMs": 6.4945,
+        "maxTickMs": 6.4945,
         "allocationDelta": null,
         "heapSizeMB": 106.21,
-        "rssMB": 100.44,
-        "cpuUserUs": 2116159,
-        "cpuSystemUs": 17924,
-        "cpuTotalUs": 2134083,
-        "dfgCompilesDelta": null,
+        "rssMB": 185.83,
+        "cpuUserUs": 2102694,
+        "cpuSystemUs": 30637,
+        "cpuTotalUs": 2133331,
+        "dfgCompilesDelta": 0,
         "ftlCompilesDelta": null,
         "osrExitsDelta": null,
-        "highWaterRssMB": 217.47,
+        "highWaterRssMB": 188.75,
         "heapTimeSeries": null,
+        "totalCompileTimeMsDelta": 0,
         "capacity": 1000000
       }
     ]
