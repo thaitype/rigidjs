@@ -81,6 +81,8 @@ const SCENARIOS: ScenarioEntry[] = [
   // Sustained / scaling
   { kind: 'sustained', name: 'B8-sustained',    file: './scenarios/b8-sustained-churn.ts',     export: 'b8Scenarios'           },
   { kind: 'scaling',   name: 'B9-scaling',      file: './scenarios/b9-heap-scaling.ts'                                         },
+  { kind: 'sustained', name: 'B8-vec',          file: './scenarios/b8-vec-sustained.ts',        export: 'b8VecScenarios'        },
+  { kind: 'scaling',   name: 'B9-vec',          file: './scenarios/b9-vec-scaling.ts'                                           },
 ]
 
 // Apply -s filter
