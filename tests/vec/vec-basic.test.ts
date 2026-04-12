@@ -84,11 +84,14 @@ describe('vec push', () => {
     expect(h.y).toBeCloseTo(2.71)
   })
 
-  it('throws "vec is full" when len === capacity', () => {
+  it('grows automatically when len === capacity (no "vec is full" error)', () => {
     const v = vec(Point2D, 2)
     v.push()
     v.push()
-    expect(() => v.push()).toThrow('vec is full')
+    // Third push triggers growth — must not throw
+    expect(() => v.push()).not.toThrow()
+    expect(v.len).toBe(3)
+    expect(v.capacity).toBe(4)
   })
 })
 

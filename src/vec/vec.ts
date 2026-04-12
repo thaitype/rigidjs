@@ -24,16 +24,23 @@ import type { ColumnRef } from '../struct/handle-codegen.js'
  * contiguous TypedArray sub-view of `capacity` elements. Handles use
  * TypedArray indexed access — no DataView, no per-slot byte arithmetic at
  * field-access time.
+ *
+ * IMPORTANT: After a growth event (triggered by push()), all previously
+ * returned column() references and the buffer reference become stale.
+ * Always re-resolve column() and buffer after any push() that might trigger
+ * growth. This is the same pattern as C++ vector iterator invalidation.
  */
 export interface Vec<F extends StructFields> {
   /**
    * Append a new element at the end. Returns the shared handle rebased
    * to the new slot (index len-1 after push).
    *
-   * In task-1: if len === capacity, throws "vec is full".
-   * (Task-2 replaces this with 2x growth.)
+   * If len === capacity, the vec grows: a new ArrayBuffer at 2x capacity
+   * is allocated, all columns are copied via TypedArray.set(), and all
+   * internal column refs are updated. Previously returned column()
+   * references become stale -- do NOT cache them across push() calls
+   * that might trigger growth.
    *
-   * @throws "vec is full" if len === capacity (task-1 only).
    * @throws "vec has been dropped" after drop().
    */
   push(): Handle<F>
@@ -54,6 +61,36 @@ export interface Vec<F extends StructFields> {
    * @throws "vec has been dropped" after drop().
    */
   get(index: number): Handle<F>
+
+  /**
+   * O(1) removal: copy all column values from the last element (len-1)
+   * into the slot at index, then decrement len. The element that was at
+   * len-1 now occupies index. Order changes.
+   *
+   * If index === len-1, this is equivalent to pop().
+   *
+   * This is the primary "remove from middle" API for hot-path code where
+   * order does not matter. Use remove() instead when order must be preserved.
+   *
+   * @param index - Must be in [0, len).
+   * @throws "index out of range" if index >= len or index < 0.
+   * @throws "vec has been dropped" after drop().
+   */
+  swapRemove(index: number): void
+
+  /**
+   * O(n) removal: shift all elements after index left by one position
+   * across all columns using TypedArray.copyWithin(), then decrement len.
+   * Order is preserved.
+   *
+   * This is the slow path for order-preserving removal. Use swapRemove()
+   * instead when order does not matter.
+   *
+   * @param index - Must be in [0, len).
+   * @throws "index out of range" if index >= len or index < 0.
+   * @throws "vec has been dropped" after drop().
+   */
+  remove(index: number): void
 
   /** Current element count (0 <= len <= capacity). */
   readonly len: number
@@ -77,7 +114,9 @@ export interface Vec<F extends StructFields> {
   drop(): void
 
   /**
-   * The single underlying ArrayBuffer.
+   * The single underlying ArrayBuffer. Changes on growth (new buffer
+   * is allocated). Do NOT cache this reference across push() calls
+   * that might trigger growth.
    *
    * @throws "vec has been dropped" after drop().
    */
@@ -89,6 +128,10 @@ export interface Vec<F extends StructFields> {
    * The name space is the same flattened dotted-key space as slab.column().
    * The returned view spans [0, capacity) elements. Only indices [0, len)
    * contain valid data.
+   *
+   * IMPORTANT: After a growth event (triggered by push()), all previously
+   * returned column() references point at the OLD buffer and are stale.
+   * Always re-resolve column() after any push() that might trigger growth.
    *
    * @throws "vec has been dropped" after drop().
    * @throws "unknown column: <name>" if name is not a valid column key.
@@ -103,7 +146,7 @@ export interface Vec<F extends StructFields> {
 const DEFAULT_CAPACITY = 16
 
 /**
- * Create a fixed-capacity (task-1) vec container for the given struct definition.
+ * Create a growable vec container for the given struct definition.
  *
  * Storage layout (SoA — identical to slab):
  *   - Exactly ONE `ArrayBuffer` of size `sizeofPerSlot * capacity`.
@@ -111,6 +154,12 @@ const DEFAULT_CAPACITY = 16
  *   - One TypedArray sub-view per column: `new TypedArrayCtor(buf, byteOffset * capacity, capacity)`.
  *   - One reusable handle instance built by generateSoAHandleClass.
  *   - Rebasing is slot-only: `_rebase(slot)`.
+ *
+ * Growth strategy (Strategy A — re-create handle on growth):
+ *   When push() overflows capacity, a new 2x-capacity ArrayBuffer is allocated,
+ *   column data is copied via TypedArray.set(), then generateSoAHandleClass() is
+ *   called again with the new column refs to produce a new handle. One allocation
+ *   per growth event. Column refs captured in the handle closure are always current.
  *
  * @param def              A StructDef produced by struct().
  * @param initialCapacity  Starting capacity. Defaults to 16.
@@ -180,9 +229,9 @@ export function vec<F extends StructFields>(
   // generateSoAHandleClass builds a class whose field getters/setters do pure TypedArray
   // indexed access: `this._c_pos_x[this._slot]`. Column TypedArrays are captured in the
   // class closure at construction time.
-  const HandleClass = generateSoAHandleClass(layout.handleTree, columnRefs)
+  let HandleClass = generateSoAHandleClass(layout.handleTree, columnRefs)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SoAHandleConstructor returns `object`; any isolates the bridge
-  const _handle = new (HandleClass as any)(0) as Handle<F>
+  let _handle = new (HandleClass as any)(0) as Handle<F>
 
   let _len = 0
   let _dropped = false
@@ -190,6 +239,55 @@ export function vec<F extends StructFields>(
   // Helper created once at vec() call time — single closure allocation, not per-call.
   function assertLive(): void {
     if (_dropped) throw new Error('vec has been dropped')
+  }
+
+  /**
+   * Grow the backing buffer to 2x capacity.
+   *
+   * Steps:
+   *  1. Compute newCapacity = _capacity * 2.
+   *  2. Allocate new ArrayBuffer.
+   *  3. Build new column TypedArrays over the new buffer.
+   *  4. Copy existing data from old columns to new columns via TypedArray.set().
+   *  5. Update _buf and _capacity.
+   *  6. Re-create the handle via Strategy A: call generateSoAHandleClass() again
+   *     with the new column refs to produce a new handle whose closure captures
+   *     the new TypedArrays. Rebases the new handle to current _len before push.
+   *
+   * Strategy A is chosen because it requires no changes to the handle codegen.
+   * The existing codegen bakes TypedArray references directly into the class
+   * closure at construction time. Re-creating the handle on growth (one allocation
+   * per growth event) is simpler than adding an indirection layer to support
+   * mutable wrapper refs (Strategy B), which would require modifying handle-codegen.ts.
+   */
+  function grow(): void {
+    const newCapacity = _capacity * 2
+    const newBuf = new ArrayBuffer(layout.sizeofPerSlot * newCapacity)
+
+    // Snapshot old columns before rebuilding.
+    const oldColumnMap = _columnMap
+
+    // Build new columns over the new buffer.
+    buildColumns(newBuf, newCapacity)
+
+    // Copy all existing data from old columns to new columns.
+    // TypedArray.set(source) copies the entire source array into the target
+    // starting at offset 0 — one native call per column.
+    for (const col of layout.columns) {
+      const oldArr = oldColumnMap.get(col.name)!
+      const newArr = _columnMap.get(col.name)!
+      newArr.set(oldArr)
+    }
+
+    // Update internal state.
+    _buf = newBuf
+    _capacity = newCapacity
+
+    // Re-create handle with new column refs (Strategy A).
+    // The old HandleClass and old _handle become unreferenced and GC-collectable.
+    HandleClass = generateSoAHandleClass(layout.handleTree, columnRefs)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    _handle = new (HandleClass as any)(0) as Handle<F>
   }
 
   // ---------------------------------------------------------------------------
@@ -200,7 +298,7 @@ export function vec<F extends StructFields>(
     push(): Handle<F> {
       assertLive()
       if (_len >= _capacity) {
-        throw new Error('vec is full')
+        grow()
       }
       const slot = _len
       _len++
@@ -226,6 +324,35 @@ export function vec<F extends StructFields>(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- same bridge as push()
       ;((_handle as any)._rebase(index))
       return _handle
+    },
+
+    swapRemove(index: number): void {
+      assertLive()
+      if (index < 0 || index >= _len) {
+        throw new Error('index out of range')
+      }
+      // Copy all column values from last element into index.
+      // When index === _len - 1, this is a self-assignment (harmless).
+      const lastIndex = _len - 1
+      for (const col of layout.columns) {
+        const arr = _columnMap.get(col.name)!
+        arr[index] = arr[lastIndex]!
+      }
+      _len--
+    },
+
+    remove(index: number): void {
+      assertLive()
+      if (index < 0 || index >= _len) {
+        throw new Error('index out of range')
+      }
+      // Shift all elements after index left by one position.
+      // TypedArray.copyWithin handles overlapping ranges correctly.
+      for (const col of layout.columns) {
+        const arr = _columnMap.get(col.name)!
+        arr.copyWithin(index, index + 1, _len)
+      }
+      _len--
     },
 
     get len(): number {
