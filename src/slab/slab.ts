@@ -223,7 +223,8 @@ export function slab<F extends StructFields>(
       if (_freeTop === 0) throw new Error('slab at capacity')
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- bounds-checked: _freeTop > 0 and _freeList is live
       const slot = _freeList![--_freeTop]!
-      bitmapSet(_bits, slot)
+      // Inline bitmapSet: avoids function-call overhead and ?? 0 branch on every insert.
+      _bits[slot >> 3] = (_bits[slot >> 3]! | (1 << (slot & 7)))
       _len++
       // SoA _rebase takes only (slot) — no DataView, no byte offset.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated and not in static TS type
@@ -236,10 +237,12 @@ export function slab<F extends StructFields>(
       if (!Number.isInteger(slot) || slot < 0 || slot >= capacity) {
         throw new Error(`slot ${slot} out of range`)
       }
-      if (!bitmapGet(_bits, slot)) {
+      // Inline bitmapGet: avoids function-call overhead and ?? 0 branch.
+      if (!(_bits[slot >> 3]! & (1 << (slot & 7)))) {
         throw new Error(`slot ${slot} already free`)
       }
-      bitmapClear(_bits, slot)
+      // Inline bitmapClear: avoids function-call overhead and ?? 0 branch.
+      _bits[slot >> 3] = (_bits[slot >> 3]! & ~(1 << (slot & 7)))
       _freeList![_freeTop++] = slot
       _len--
     },
@@ -309,8 +312,10 @@ export function slab<F extends StructFields>(
       assertLive()
       // Internal counted loop — no iterator protocol, no per-call allocation.
       // Reuses the single shared handle instance by rebasing it to each occupied slot.
+      // Inline bitmap check to avoid function-call overhead and ?? 0 branch on every slot.
       for (let i = 0; i < capacity; i++) {
-        if (!bitmapGet(_bits, i)) continue
+        // bitmapGet inlined: (_bits[i >> 3] & (1 << (i & 7))) !== 0
+        if (!(_bits[i >> 3]! & (1 << (i & 7)))) continue
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated and not in static TS type
         ;((_handle as any)._rebase(i))
         cb(_handle, i)

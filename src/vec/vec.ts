@@ -245,10 +245,14 @@ export function vec<F extends StructFields>(
 
   let _columnMap = new Map<string, AnyTypedArray>()
   let columnRefs = new Map<string, ColumnRef>()
+  // Pre-extracted column arrays for allocation-free hot-path access in swapRemove/remove.
+  // Kept in sync with _columnMap on every buildColumns() call.
+  let _columnArrays: AnyTypedArray[] = []
 
   function buildColumns(buf: ArrayBuffer, cap: number): void {
     _columnMap = new Map()
     columnRefs = new Map()
+    _columnArrays = []
     for (const col of layout.columns) {
       const bufByteOffset = col.byteOffset * cap
 
@@ -265,6 +269,7 @@ export function vec<F extends StructFields>(
 
       _columnMap.set(col.name, array)
       columnRefs.set(col.name, { name: col.name, array })
+      _columnArrays.push(array)
     }
   }
 
@@ -299,18 +304,18 @@ export function vec<F extends StructFields>(
    *     with the new column refs to produce a new handle whose closure captures
    *     the new TypedArrays. Rebases the new handle to current _len before push.
    *
-   * Strategy A is chosen because it requires no changes to the handle codegen.
-   * The existing codegen bakes TypedArray references directly into the class
-   * closure at construction time. Re-creating the handle on growth (one allocation
-   * per growth event) is simpler than adding an indirection layer to support
-   * mutable wrapper refs (Strategy B), which would require modifying handle-codegen.ts.
+   * Strategy A is chosen because mutating column TypedArray fields on an existing
+   * handle object (Strategy B / _rebindColumns) causes JSC JIT deoptimization:
+   * the JIT profiles field types as stable and deoptimizes when they change.
+   * Re-creating the handle once per growth event keeps each handle instance
+   * monomorphic throughout its lifetime, enabling full JIT specialization.
    */
   function grow(): void {
     const newCapacity = _capacity * 2
     const newBuf = new ArrayBuffer(layout.sizeofPerSlot * newCapacity)
 
     // Snapshot old columns before rebuilding.
-    const oldColumnMap = _columnMap
+    const oldColumnArrays = _columnArrays.slice()
 
     // Build new columns over the new buffer.
     buildColumns(newBuf, newCapacity)
@@ -318,10 +323,8 @@ export function vec<F extends StructFields>(
     // Copy all existing data from old columns to new columns.
     // TypedArray.set(source) copies the entire source array into the target
     // starting at offset 0 — one native call per column.
-    for (const col of layout.columns) {
-      const oldArr = oldColumnMap.get(col.name)!
-      const newArr = _columnMap.get(col.name)!
-      newArr.set(oldArr)
+    for (let c = 0; c < _columnArrays.length; c++) {
+      _columnArrays[c]!.set(oldColumnArrays[c]!)
     }
 
     // Update internal state.
@@ -378,9 +381,10 @@ export function vec<F extends StructFields>(
       }
       // Copy all column values from last element into index.
       // When index === _len - 1, this is a self-assignment (harmless).
+      // Use pre-extracted _columnArrays to avoid Map.get() per column per call.
       const lastIndex = _len - 1
-      for (const col of layout.columns) {
-        const arr = _columnMap.get(col.name)!
+      for (let c = 0; c < _columnArrays.length; c++) {
+        const arr = _columnArrays[c]!
         arr[index] = arr[lastIndex]!
       }
       _len--
@@ -393,9 +397,9 @@ export function vec<F extends StructFields>(
       }
       // Shift all elements after index left by one position.
       // TypedArray.copyWithin handles overlapping ranges correctly.
-      for (const col of layout.columns) {
-        const arr = _columnMap.get(col.name)!
-        arr.copyWithin(index, index + 1, _len)
+      // Use pre-extracted _columnArrays to avoid Map.get() per column per call.
+      for (let c = 0; c < _columnArrays.length; c++) {
+        _columnArrays[c]!.copyWithin(index, index + 1, _len)
       }
       _len--
     },
@@ -478,23 +482,21 @@ export function vec<F extends StructFields>(
       const newBuf = new ArrayBuffer(layout.sizeofPerSlot * n)
 
       // Snapshot old columns before rebuilding.
-      const oldColumnMap = _columnMap
+      const oldColumnArrays = _columnArrays.slice()
 
       // Build new columns over the new buffer.
       buildColumns(newBuf, n)
 
       // Copy existing data from old columns to new columns.
-      for (const col of layout.columns) {
-        const oldArr = oldColumnMap.get(col.name)!
-        const newArr = _columnMap.get(col.name)!
-        newArr.set(oldArr)
+      for (let c = 0; c < _columnArrays.length; c++) {
+        _columnArrays[c]!.set(oldColumnArrays[c]!)
       }
 
       // Update internal state.
       _buf = newBuf
       _capacity = n
 
-      // Re-create handle with new column refs (Strategy A).
+      // Re-create handle with new column refs (Strategy A) — same as grow().
       HandleClass = generateSoAHandleClass(layout.handleTree, columnRefs)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       _handle = new (HandleClass as any)(0) as Handle<F>
