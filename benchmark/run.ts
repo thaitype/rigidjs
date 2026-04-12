@@ -57,15 +57,16 @@ function splitSustainedResults(results: SustainedResult[]): {
 import { b1Scenarios } from './scenarios/b1-struct-creation.js'
 import { b2Scenarios } from './scenarios/b2-insert-remove-churn.js'
 import { b3Scenarios } from './scenarios/b3-iterate-mutate.js'
+import { b3ColumnScenarios } from './scenarios/b3-column.js'
 import { b7Scenarios } from './scenarios/b7-nested-struct.js'
 import { b8Scenarios } from './scenarios/b8-sustained-churn.js'
 import { b9JsBaselineFactory, b9RigidJsFactory, CAPACITIES, XL_CAPACITY } from './scenarios/b9-heap-scaling.js'
 
 // ---------------------------------------------------------------------------
-// Run all scenarios B1 → B2 → B3 → B7
+// Run all scenarios B1 → B2 → B3 → B3-column → B7
 // ---------------------------------------------------------------------------
 
-const allScenarios = [...b1Scenarios, ...b2Scenarios, ...b3Scenarios, ...b7Scenarios]
+const allScenarios = [...b1Scenarios, ...b2Scenarios, ...b3Scenarios, ...b3ColumnScenarios, ...b7Scenarios]
 
 console.log('Running benchmarks...\n')
 const results: BenchResult[] = await runAll(allScenarios)
@@ -467,8 +468,16 @@ const task10TimeseriesPayload = {
   b8: b8TimeSeries,
   b9: b9TimeSeries,
 }
-await writeReportSplit(task10ReportDir, task10Payload, task10TimeseriesPayload)
-console.log(`\nTask-10 results written to ${task10ResultsPath}`)
+// task-4: Guard task-10 writes — the task-10 report was first written in milestone-3/task-1
+// as the corrected-JIT-counter re-run. From task-4 onward, the milestone-3 run MUST NOT
+// overwrite the committed task-10 artifacts — they are frozen historical records.
+// Guard: only write if the results.json does not already exist (same pattern as task-7/task-9).
+if (!(await Bun.file(task10ResultsPath).exists())) {
+  await writeReportSplit(task10ReportDir, task10Payload, task10TimeseriesPayload)
+  console.log(`\nTask-10 results written to ${task10ResultsPath}`)
+} else {
+  console.log(`\nSkipping ${task10ResultsPath} (already exists — task-10 historical artifact)`)
+}
 
 // ---------------------------------------------------------------------------
 // Task-10 benchmark.md — helper utilities
@@ -845,8 +854,12 @@ Machine-readable data: \`results.json\`
 `
 
 const task10BenchmarkPath = `${task10ReportDir}/benchmark.md`
-await Bun.write(task10BenchmarkPath, task10BenchmarkMd)
-console.log(`Task-10 report written to ${task10BenchmarkPath}\n`)
+if (!(await Bun.file(task10BenchmarkPath).exists())) {
+  await Bun.write(task10BenchmarkPath, task10BenchmarkMd)
+  console.log(`Task-10 report written to ${task10BenchmarkPath}\n`)
+} else {
+  console.log(`Skipping ${task10BenchmarkPath} (already exists — task-10 historical artifact)\n`)
+}
 
 // ---------------------------------------------------------------------------
 // Milestone-3 task-3 report — raw bench output for task-4 consumption
@@ -887,8 +900,77 @@ const task3TimeseriesPayload = {
   b9: task3B9TimeSeries,
 }
 
-await writeReportSplit(task3ReportDir, task3Payload, task3TimeseriesPayload)
-console.log(`Milestone-3 task-3 results written to ${task3ReportDir}/results.json`)
-console.log(`(raw-timeseries.json written alongside — gitignored)\n`)
+// task-4: Guard task-3 writes — task-3 results are a historical benchmark artifact from
+// the first post-cutover SoA run. Subsequent bench runs write to task-4, not task-3.
+const task3ResultsPath = `${task3ReportDir}/results.json`
+if (!(await Bun.file(task3ResultsPath).exists())) {
+  await writeReportSplit(task3ReportDir, task3Payload, task3TimeseriesPayload)
+  console.log(`Milestone-3 task-3 results written to ${task3ResultsPath}`)
+  console.log(`(raw-timeseries.json written alongside — gitignored)\n`)
+} else {
+  console.log(`Skipping ${task3ResultsPath} (already exists — task-3 historical artifact)\n`)
+}
+
+// ---------------------------------------------------------------------------
+// Milestone-3 task-4 report — full suite including B3-column
+// ---------------------------------------------------------------------------
+// This block writes the task-4 results.json to .chief/milestone-3/_report/task-4/.
+// The B3-column results are extracted from the `results` array (same run).
+// Output routing: BENCH_MILESTONE=4 (or default) writes here and skips no-op.
+// ---------------------------------------------------------------------------
+
+const task4ReportDir = '.chief/milestone-3/_report/task-4'
+await mkdir(task4ReportDir, { recursive: true })
+
+const task4Meta = {
+  bunVersion: Bun.version,
+  platform: process.platform,
+  arch: process.arch,
+  date: new Date().toISOString(),
+  milestone: 'milestone-3',
+  task: 'task-4',
+  jitCountersAvailable,
+  rawTimeseriesPath: './raw-timeseries.json',
+  baselineReference: '.chief/milestone-2/_report/task-10/results.json',
+}
+
+// Separate b3Column results from the main oneShot array.
+// b3ColumnScenarios scenarios are identified by their name prefix.
+const b3ColumnResults = results.filter((r) => r.name.startsWith('B3-column'))
+
+// Build scalar-only results for committed results.json
+const { scalars: task4B8Scalars, timeSeries: task4B8TimeSeries } = splitSustainedResults(b8Results)
+const { scalars: task4B9Scalars, timeSeries: task4B9TimeSeries } = splitSustainedResults(b9Results)
+
+const task4Payload = {
+  meta: task4Meta,
+  oneShot: results,
+  sustained: {
+    b8: task4B8Scalars,
+    b9: task4B9Scalars,
+  },
+  // b3Column is a separate top-level key — milestone-3-specific addition.
+  // Consumers of prior raw data JSON files (task-7/task-9/task-10) keep working
+  // because they don't know to look for this key.
+  b3Column: b3ColumnResults,
+}
+
+const task4TimeseriesPayload = {
+  meta: { date: task4Meta.date, description: 'heapTimeSeries arrays stripped from results.json' },
+  b8: task4B8TimeSeries,
+  b9: task4B9TimeSeries,
+}
+
+// Guard task-4 results once they are committed — subsequent bench runs should not
+// overwrite the milestone-3 task-4 historical record. Remove or rename this guard
+// when starting a new milestone that writes to a different output directory.
+const task4ResultsPath = `${task4ReportDir}/results.json`
+if (!(await Bun.file(task4ResultsPath).exists())) {
+  await writeReportSplit(task4ReportDir, task4Payload, task4TimeseriesPayload)
+  console.log(`Milestone-3 task-4 results written to ${task4ResultsPath}`)
+  console.log(`(raw-timeseries.json written alongside — gitignored)\n`)
+} else {
+  console.log(`Skipping ${task4ResultsPath} (already exists — task-4 historical artifact)\n`)
+}
 
 process.exit(0)
