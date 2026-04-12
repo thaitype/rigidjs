@@ -159,13 +159,13 @@ Inside the slab, **one** `ArrayBuffer` holds all the data, with each field store
 
 ```
                     One ArrayBuffer (27 bytes)
-  ┌─────────────────────┬─────────────────────┬───────────┐
-  │   x column          │   y column          │ hp column │
-  │   Float32Array      │   Float32Array      │ Uint8Array│
-  │                     │                     │           │
-  │  [x₀]  [x₁]  [x₂] │  [y₀]  [y₁]  [y₂]  │ [h₀][h₁][h₂]│
-  │   4B    4B    4B    │   4B    4B    4B    │  1B  1B  1B│
-  └─────────────────────┴─────────────────────┴───────────┘
+  ┌─────────────────────┬─────────────────────┬──────────────┐
+  │   x column          │   y column          │ hp column    │
+  │   Float32Array      │   Float32Array      │ Uint8Array   │
+  │                     │                     │              │
+  │  [x₀]  [x₁]  [x₂]   │  [y₀]  [y₁]  [y₂]   │ [h₀][h₁][h₂] │
+  │   4B    4B    4B    │   4B    4B    4B    │  1B  1B  1B  │
+  └─────────────────────┴─────────────────────┴──────────────┘
        12 bytes               12 bytes            3 bytes
 ```
 
@@ -242,7 +242,7 @@ The particle example is the best single file to read next. It demonstrates every
 
 ## Benchmarks
 
-Single machine (Apple Silicon, Bun 1.3.8), one run, no statistical significance claims. Treat the shape of the numbers more than the digits.
+Single machine (Apple Silicon, Macbook Pro M4, Bun 1.3.8), one run, no statistical significance claims. Treat the shape of the numbers more than the digits.
 
 ### Iteration throughput — the headline result
 
