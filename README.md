@@ -133,65 +133,87 @@ The column reference is resolved once (allocation-free on every call — the vie
 
 RigidJS asks you to keep a few things in mind. Once they click, the rest of the API follows.
 
-### Memory layout — what the buffer actually looks like
+### Memory layout — from objects to columns
 
-Take a tiny struct with just three fields:
+A normal JS developer stores entities as objects in an array:
 
 ```ts
-const Point = struct({
-  x:  'f32',   // 4 bytes
-  y:  'f32',   // 4 bytes
-  hp: 'u8',    // 1 byte
-})
-// sizeof(Point) = 4 + 4 + 1 = 9 bytes
+// Plain JS: one object per entity, each tracked by the GC
+const points = [
+  { x: 1.0, y: 2.0, hp: 100 },   // object 1
+  { x: 3.0, y: 4.0, hp: 80 },    // object 2
+  { x: 5.0, y: 6.0, hp: 60 },    // object 3
+]
 ```
 
-Now allocate storage for three of them:
+Each `{}` is a separate heap allocation with a hidden class, property storage, and GC metadata. At 100k entities that's 100k objects the garbage collector must track, scan, and eventually free.
+
+RigidJS flips the layout. Instead of "one object per entity" (Array of Structs), it stores "one column per field" (Structure of Arrays):
 
 ```ts
+const Point = struct({ x: 'f32', y: 'f32', hp: 'u8' })
 const points = slab(Point, 3)
 ```
 
-This allocates **one** `ArrayBuffer` with each field stored as a contiguous column — all `x` values together, all `y` values together, all `hp` values together:
+Inside the slab, **one** `ArrayBuffer` holds all the data, with each field stored as a contiguous column:
 
 ```
-ArrayBuffer (27 bytes)
-┌───────────────┬───────────────┬─────────┐
-│  x column     │  y column     │hp column│
-│  Float32Array │  Float32Array │Uint8Arr │
-│ [x₀, x₁, x₂] │ [y₀, y₁, y₂] │[h₀,h₁,h₂]│
-│  12 bytes     │  12 bytes     │ 3 bytes │
-└───────────────┴───────────────┴─────────┘
+                    One ArrayBuffer (27 bytes)
+  ┌─────────────────────┬─────────────────────┬───────────┐
+  │   x column          │   y column          │ hp column │
+  │   Float32Array      │   Float32Array      │ Uint8Array│
+  │                     │                     │           │
+  │  [x₀]  [x₁]  [x₂] │  [y₀]  [y₁]  [y₂]  │ [h₀][h₁][h₂]│
+  │   4B    4B    4B    │   4B    4B    4B    │  1B  1B  1B│
+  └─────────────────────┴─────────────────────┴───────────┘
+       12 bytes               12 bytes            3 bytes
 ```
 
-Each column is a TypedArray **view** into slices of the same underlying buffer. Reading a field is a single indexed TypedArray access:
+### Slots — how entities map to columns
+
+A **slot** is a numeric index that identifies one entity across all columns. Slot 0 is the first entity, slot 1 is the second, and so on.
 
 ```
-points.get(i).x   =>  Float32Array[i]   // one indexed load, JIT-inlineable
-points.get(i).y   =>  Float32Array[i]
-points.get(i).hp  =>  Uint8Array[i]
+       slot:    0     1     2
+
+  x column:  [ 1.0 | 3.0 | 5.0 ]    ← Float32Array, x[slot]
+  y column:  [ 2.0 | 4.0 | 6.0 ]    ← Float32Array, y[slot]
+  hp column: [ 100 |  80 |  60 ]    ← Uint8Array,   hp[slot]
 ```
 
-The handle is a tiny accessor class code-generated at `struct()` call time. Each getter captures its specific TypedArray directly — monomorphic, no polymorphic dispatch, no DataView overhead.
-
-**Now compare what the GC sees:**
+Reading `points.get(1).x` means "look up index 1 in the x column" — a single `Float32Array[1]` indexed load. The JIT compiles this to one machine instruction. No property lookup, no hidden class check, no pointer chasing.
 
 ```
-Plain JS array-of-objects:           RigidJS slab:
+points.get(i).x   =>  xColumn[i]    // Float32Array[i], JIT-inlineable
+points.get(i).y   =>  yColumn[i]    // Float32Array[i]
+points.get(i).hp  =>  hpColumn[i]   // Uint8Array[i]
+```
 
-  [Array]  <-- heap                    [ArrayBuffer, 27 bytes]  <-- heap
-     |                                    + 3 TypedArray views (x, y, hp)
-     +--> {x,y,hp}  <-- heap
-     +--> {x,y,hp}  <-- heap            (3 views + 1 buffer = 4 objects,
-     +--> {x,y,hp}  <-- heap             regardless of entity count)
+The handle is a tiny accessor class code-generated at `struct()` call time. Each getter captures its specific TypedArray directly — monomorphic, no polymorphic dispatch.
+
+### Why this matters for the GC
+
+```
+Plain JS (3 entities):               RigidJS slab (3 entities):
+
+  [Array]  <-- GC tracks this          [ArrayBuffer]  <-- GC tracks this
+     |                                    + Float32Array view (x)
+     +--> {x,y,hp}  <-- GC tracks        + Float32Array view (y)
+     +--> {x,y,hp}  <-- GC tracks        + Uint8Array view (hp)
+     +--> {x,y,hp}  <-- GC tracks
 
   GC tracks: 4 objects                 GC tracks: 4 objects
-  Memory:    fragmented                Memory:    contiguous columns
-  Field:     property lookup           Field:     TypedArray[i]
-  Growth:    N objects per insert      Growth:    zero allocs per insert
+  Growth:    +1 object per insert      Growth:    0 objects per insert
 ```
 
-At 3 entities, the GC counts are similar. Scale to 100,000 particles and the difference becomes the whole point: plain JS creates 100,001 heap objects (array + N entity objects), each with a hidden class, scattered across memory. RigidJS: one `ArrayBuffer` + a handful of TypedArray views + bookkeeping — measured at ~368 GC-tracked objects total, regardless of entity count.
+At 3 entities the GC counts are similar. Now scale to **100,000 entities:**
+
+```
+Plain JS:   100,001 GC-tracked objects (array + 100k entity objects)
+RigidJS:        ~368 GC-tracked objects (1 buffer + views + bookkeeping)
+```
+
+That's ~272x fewer objects. The GC has almost nothing to scan. When it does wake up, its job is trivial — a handful of long-lived buffers instead of a hundred thousand short-lived objects scattered across the heap. This is why RigidJS's worst-case GC pause is 6 ms while plain JS spikes to 53 ms under sustained load.
 
 ### Blueprint vs container
 
