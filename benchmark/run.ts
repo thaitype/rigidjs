@@ -1,5 +1,5 @@
 import { mkdir } from 'node:fs/promises'
-import { runAll, formatTable, benchSustained, benchScaling, formatSustainedTable, formatSparkline, jitCountersAvailable } from './harness.js'
+import { formatTable, formatSustainedTable, formatSparkline, jitCountersAvailable } from './harness.js'
 import type { BenchResult, SustainedResult } from './harness.js'
 
 // ---------------------------------------------------------------------------
@@ -54,36 +54,157 @@ function splitSustainedResults(results: SustainedResult[]): {
     timeSeries: results.map((r) => ({ name: r.name, heapTimeSeries: r.heapTimeSeries })),
   }
 }
-import { b1Scenarios } from './scenarios/b1-struct-creation.js'
-import { b2Scenarios } from './scenarios/b2-insert-remove-churn.js'
-import { b3Scenarios } from './scenarios/b3-iterate-mutate.js'
-import { b3ColumnScenarios } from './scenarios/b3-column.js'
-import { b7Scenarios } from './scenarios/b7-nested-struct.js'
-import { b8Scenarios } from './scenarios/b8-sustained-churn.js'
-import { b9JsBaselineFactory, b9RigidJsFactory, CAPACITIES, XL_CAPACITY } from './scenarios/b9-heap-scaling.js'
-// milestone-4 vec scenarios
-import { b1VecScenarios } from './scenarios/b1-vec-creation.js'
-import { b2VecScenarios } from './scenarios/b2-vec-churn.js'
-import { b3VecHandleScenarios } from './scenarios/b3-vec-handle.js'
-import { b3VecColumnScenarios } from './scenarios/b3-vec-column.js'
-import { b3PartialScenarios } from './scenarios/b3-partial.js'
-import { b3VecGetScenarios } from './scenarios/b3-vec-get.js'
 
 // ---------------------------------------------------------------------------
-// Run all scenarios B1 → B2 → B3 → B3-column → B7 → vec scenarios
+// Per-process subprocess runner
 // ---------------------------------------------------------------------------
 
-const allScenarios = [
-  ...b1Scenarios, ...b2Scenarios, ...b3Scenarios, ...b3ColumnScenarios, ...b7Scenarios,
+/**
+ * Spawn a single scenario group in a fresh OS process via Bun.spawn().
+ * Each process runs only one scenario group so there is no JIT cross-contamination.
+ *
+ * The subprocess imports benchmark/run-scenario.ts, runs the scenario(s), and
+ * writes a JSON object to stdout.
+ *
+ * Returns the parsed JSON output from the subprocess.
+ */
+async function spawnScenario(opts: {
+  file: string       // path relative to benchmark/ (e.g. ./scenarios/b1-struct-creation.ts)
+  export?: string    // named export in the file (required for oneshot and sustained)
+  type: 'oneshot' | 'sustained' | 'scaling'
+  label: string      // human-readable label for progress output
+}): Promise<unknown> {
+  const args = [
+    '--smol',         // reduce per-process memory overhead (no effect on correctness)
+    'benchmark/run-scenario.ts',
+    '--file', opts.file,
+    '--type', opts.type,
+  ]
+  if (opts.export) {
+    args.push('--export', opts.export)
+  }
+
+  console.log(`  Spawning: ${opts.label}`)
+
+  const proc = Bun.spawn(['bun', ...args], {
+    env: { ...process.env },
+    stdout: 'pipe',
+    stderr: 'pipe',
+    cwd: process.cwd(),
+  })
+
+  const [stdoutBuf, stderrBuf, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ])
+
+  if (exitCode !== 0) {
+    const stderrTrimmed = stderrBuf.trim()
+    throw new Error(
+      `Subprocess failed for "${opts.label}" (exit ${exitCode}):\n${stderrTrimmed || '(no stderr)'}`
+    )
+  }
+
+  if (stderrBuf.trim()) {
+    // Print subprocess stderr as warnings (non-fatal)
+    process.stderr.write(`[${opts.label}] stderr:\n${stderrBuf}\n`)
+  }
+
+  try {
+    return JSON.parse(stdoutBuf) as unknown
+  } catch {
+    throw new Error(
+      `Subprocess for "${opts.label}" produced invalid JSON:\n${stdoutBuf.slice(0, 500)}`
+    )
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Typed subprocess result decoders
+// ---------------------------------------------------------------------------
+
+interface OneshotSubprocessResult {
+  type: 'oneshot'
+  results: BenchResult[]
+}
+
+interface SustainedSubprocessResult {
+  type: 'sustained'
+  results: SustainedResult[]
+}
+
+interface ScalingSubprocessResult {
+  type: 'scaling'
+  b9JsResults: SustainedResult[]
+  b9RigidResults: SustainedResult[]
+}
+
+function assertOneshotResult(v: unknown, label: string): OneshotSubprocessResult {
+  const r = v as OneshotSubprocessResult
+  if (r?.type !== 'oneshot' || !Array.isArray(r.results)) {
+    throw new Error(`Expected oneshot result from "${label}", got: ${JSON.stringify(v)?.slice(0, 200)}`)
+  }
+  return r
+}
+
+function assertSustainedResult(v: unknown, label: string): SustainedSubprocessResult {
+  const r = v as SustainedSubprocessResult
+  if (r?.type !== 'sustained' || !Array.isArray(r.results)) {
+    throw new Error(`Expected sustained result from "${label}", got: ${JSON.stringify(v)?.slice(0, 200)}`)
+  }
+  return r
+}
+
+function assertScalingResult(v: unknown, label: string): ScalingSubprocessResult {
+  const r = v as ScalingSubprocessResult
+  if (r?.type !== 'scaling' || !Array.isArray(r.b9JsResults) || !Array.isArray(r.b9RigidResults)) {
+    throw new Error(`Expected scaling result from "${label}", got: ${JSON.stringify(v)?.slice(0, 200)}`)
+  }
+  return r
+}
+
+// ---------------------------------------------------------------------------
+// Run all scenario groups in separate subprocesses
+// ---------------------------------------------------------------------------
+
+console.log('Running benchmarks (per-process isolation via Bun.spawn)...\n')
+
+// One-shot scenarios (B1, B2, B3, B7, vec scenarios)
+// Each scenario FILE is spawned as a separate process for maximum JIT isolation.
+
+const oneshotGroups: Array<{ file: string; exportName: string; label: string }> = [
+  { file: './scenarios/b1-struct-creation.ts',   exportName: 'b1Scenarios',          label: 'B1 — struct creation' },
+  { file: './scenarios/b2-insert-remove-churn.ts', exportName: 'b2Scenarios',         label: 'B2 — insert/remove churn' },
+  { file: './scenarios/b3-iterate-mutate.ts',    exportName: 'b3Scenarios',           label: 'B3 — iterate + mutate' },
+  { file: './scenarios/b3-column.ts',            exportName: 'b3ColumnScenarios',     label: 'B3-column — slab column' },
+  { file: './scenarios/b7-nested-struct.ts',     exportName: 'b7Scenarios',           label: 'B7 — nested struct' },
   // milestone-4 vec scenarios
-  ...b1VecScenarios, ...b2VecScenarios, ...b3VecHandleScenarios, ...b3VecColumnScenarios, ...b3PartialScenarios, ...b3VecGetScenarios,
+  { file: './scenarios/b1-vec-creation.ts',      exportName: 'b1VecScenarios',        label: 'B1-vec — vec creation' },
+  { file: './scenarios/b2-vec-churn.ts',         exportName: 'b2VecScenarios',        label: 'B2-vec — vec churn' },
+  { file: './scenarios/b3-vec-handle.ts',        exportName: 'b3VecHandleScenarios',  label: 'B3-vec-handle — vec handle iteration' },
+  { file: './scenarios/b3-vec-column.ts',        exportName: 'b3VecColumnScenarios',  label: 'B3-vec-column — vec column' },
+  { file: './scenarios/b3-partial.ts',           exportName: 'b3PartialScenarios',    label: 'B3-partial — partial field' },
+  { file: './scenarios/b3-vec-get.ts',           exportName: 'b3VecGetScenarios',     label: 'B3-vec-get — vec indexed get' },
 ]
 
-console.log('Running benchmarks...\n')
-const results: BenchResult[] = await runAll(allScenarios)
+const allOneShotResults: BenchResult[] = []
+
+for (const group of oneshotGroups) {
+  const raw = await spawnScenario({
+    file: group.file,
+    export: group.exportName,
+    type: 'oneshot',
+    label: group.label,
+  })
+  const parsed = assertOneshotResult(raw, group.label)
+  allOneShotResults.push(...parsed.results)
+}
+
+const results = allOneShotResults
 
 // Print summary table to stdout
-console.log(formatTable(results))
+console.log('\n' + formatTable(results))
 
 // ---------------------------------------------------------------------------
 // Build run metadata
@@ -137,10 +258,16 @@ function mdTable(rows: BenchResult[]): string {
   return [header, sep, ...dataRows].join('\n')
 }
 
-const b1Results = findResults(b1Scenarios.map((s) => s.name))
-const b2Results = findResults(b2Scenarios.map((s) => s.name))
-const b3Results = findResults(b3Scenarios.map((s) => s.name))
-const b7Results = findResults(b7Scenarios.map((s) => s.name))
+// Recover the original per-scenario arrays from the combined results for report generation
+const b1Scenarios = results.filter((r) => r.name.startsWith('B1 ') && !r.name.includes('vec'))
+const b2Scenarios = results.filter((r) => r.name.startsWith('B2 ') && !r.name.includes('vec'))
+const b3Scenarios = results.filter((r) => r.name.startsWith('B3 JS') || r.name.startsWith('B3 RigidJS'))
+const b7Scenarios = results.filter((r) => r.name.startsWith('B7 '))
+
+const b1Results = b1Scenarios
+const b2Results = b2Scenarios
+const b3Results = b3Scenarios
+const b7Results = b7Scenarios
 
 const b1JsAllocDelta = b1Results[0]?.allocationDelta ?? 0
 const b1RigidAllocDelta = b1Results[1]?.allocationDelta ?? 0
@@ -213,30 +340,29 @@ if (!(await Bun.file(benchmarkPath).exists())) {
 }
 
 // ---------------------------------------------------------------------------
-// B8 — Sustained churn (10s, 100k capacity, 1k churn/tick)
+// B8 — Sustained churn (spawned in its own subprocess)
 // ---------------------------------------------------------------------------
 
 console.log('Running sustained-load benchmarks (B8/B9)...\n')
 
-const b8Results: SustainedResult[] = []
-for (const scenario of b8Scenarios) {
-  Bun.gc(true)
-  await Bun.sleep(100)
-  const result = await benchSustained(scenario)
-  b8Results.push(result)
-}
+const b8Raw = await spawnScenario({
+  file: './scenarios/b8-sustained-churn.ts',
+  export: 'b8Scenarios',
+  type: 'sustained',
+  label: 'B8 — sustained churn',
+})
+const b8Results: SustainedResult[] = assertSustainedResult(b8Raw, 'B8 — sustained churn').results
 
 // ---------------------------------------------------------------------------
-// B9 — Heap-pressure scaling curve
+// B9 — Heap-pressure scaling curve (spawned in its own subprocess)
 // ---------------------------------------------------------------------------
 
-const xlEnabled =
-  process.env['RIGIDJS_BENCH_XL'] === '1' || process.env['RIGIDJS_BENCH_XL'] === 'true'
-const b9Capacities: number[] = [...CAPACITIES]
-if (xlEnabled) b9Capacities.push(XL_CAPACITY)
-
-const b9JsResults = await benchScaling(b9JsBaselineFactory, b9Capacities)
-const b9RigidResults = await benchScaling(b9RigidJsFactory, b9Capacities)
+const b9Raw = await spawnScenario({
+  file: './scenarios/b9-heap-scaling.ts',
+  type: 'scaling',
+  label: 'B9 — heap-pressure scaling',
+})
+const { b9JsResults, b9RigidResults } = assertScalingResult(b9Raw, 'B9 — heap-pressure scaling')
 
 // Interleave JS and RigidJS by capacity for the flat results array
 const b9Results: SustainedResult[] = []
@@ -261,7 +387,7 @@ const task9Meta = {
   platform: process.platform,
   arch: process.arch,
   date: new Date().toISOString(),
-  xlEnabled,
+  xlEnabled: process.env['RIGIDJS_BENCH_XL'] === '1' || process.env['RIGIDJS_BENCH_XL'] === 'true',
 }
 
 // task-10: Guard task-9 writes — historical artifact, do not overwrite on re-runs.
@@ -372,6 +498,7 @@ if (verdictOutcome === 'supported') {
 **Thesis not supported by this data.** RigidJS tail latency (p99: ${b8Rigid.p99TickMs.toFixed(4)}ms, p999: ${b8Rigid.p999TickMs.toFixed(4)}ms, max: ${b8Rigid.maxTickMs.toFixed(4)}ms) is not meaningfully lower than the JS baseline (p99: ${b8Js.p99TickMs.toFixed(4)}ms, p999: ${b8Js.p999TickMs.toFixed(4)}ms, max: ${b8Js.maxTickMs.toFixed(4)}ms) at this scale. The DataView dispatch overhead that made RigidJS 2.6x–6.2x slower on raw throughput benchmarks (task-7) appears to dominate over any GC-pause savings from the ~300x lower object count. This does not mean the thesis is wrong in principle — at larger capacities (1M+, XL run) or with longer-running workloads, the GC pause savings may eventually exceed the DataView cost. The B9 scaling data (see above) can clarify whether the crossover point exists in the measured range. Until then, the honest reading is that RigidJS trades higher mean and tail latency for lower memory pressure and object-count, which may matter for memory-constrained or very large-scale scenarios but does not yet translate to p99 wins at 100k capacity on this machine.`
 }
 
+const xlEnabled = task9Meta.xlEnabled
 const xlNote = xlEnabled
   ? `XL run (10M capacity) was enabled via \`RIGIDJS_BENCH_XL=1\`. Note the ~600MB memory budget.`
   : `XL run (10M capacity) was not enabled. To run it: \`RIGIDJS_BENCH_XL=1 bun run bench\`. Note the ~600MB memory budget for the 10M case.`
@@ -562,8 +689,8 @@ const b8Js10 = b8Results[0]!
 const b8Rigid10 = b8Results[1]!
 
 // CPU rows for the report tables
-const b1CpuRows = results.filter((r) => r.name.startsWith('B1'))
-const b7CpuRows = results.filter((r) => r.name.startsWith('B7'))
+const b1CpuRows = results.filter((r) => r.name.startsWith('B1 ') && !r.name.includes('vec'))
+const b7CpuRows = results.filter((r) => r.name.startsWith('B7 '))
 
 function buildOneShotCpuRowsTyped(rs: BenchResult[]): Array<{
   name: string; wallMs: number; userMs: number; systemMs: number; totalMs: number; blockedMs: number
@@ -717,7 +844,7 @@ const task10BenchmarkMd = `# RigidJS Benchmark Report — Task 10 (CPU, JIT, Hig
 
 ## Correction — JIT counter measurement fixed in milestone-3/task-1
 
-The original task-10 report (committed in milestone-2) showed all JIT counter columns as \`-\` (null) and attributed this to a "Bun 1.3.8 limitation". **That attribution was incorrect.** The root cause was a harness measurement bug: \`numberOfDFGCompiles\` and its sibling counters have the signature \`(fn: Function) => number\` — they are *per-function* counters that ask JSC "how many times has THIS specific function been DFG-compiled?". The probe and harness in task-10 called these counters with **zero arguments**, which returns \`undefined\`, which was then misinterpreted as "counter unavailable".
+The original task-10 report (committed in milestone-2) showed all JIT counter columns as \`-\` (null) and attributed this to a "Bun 1.3.8 limitation". **That attribution was incorrect.** The root cause was a harness measurement bug: \`numberOfDFGCompiles\` and its sibling counters have the signature \`(fn: Function) => number\` — they are *per-function* counters that ask JSC "how many times has THIS specific function object been compiled by the DFG tier?". The probe and harness in task-10 called these counters with **zero arguments**, which returns \`undefined\`, which was then misinterpreted as "counter unavailable".
 
 Verified correct usage (Bun 1.3.8 darwin/arm64, from milestone-2 summary "Known measurement issues" section):
 \`\`\`ts
@@ -1047,6 +1174,52 @@ const m4Task5TimeseriesPayload = {
 
 await writeReportSplit(m4Task5ReportDir, m4Task5Payload, m4Task5TimeseriesPayload)
 console.log(`\nMilestone-4 task-5 results written to ${m4Task5ReportDir}/results.json`)
+console.log(`(raw-timeseries.json written alongside — gitignored)\n`)
+
+// ---------------------------------------------------------------------------
+// Milestone-5 task-1 report — per-process isolated full suite results
+// ---------------------------------------------------------------------------
+// This block writes the task-1 results.json to .chief/milestone-5/_report/task-1/.
+// It is NOT guarded — each bench run overwrites it so the report stays current.
+// This is the first full-suite run using per-process isolation.
+// ---------------------------------------------------------------------------
+
+const m5Task1ReportDir = '.chief/milestone-5/_report/task-1'
+await mkdir(m5Task1ReportDir, { recursive: true })
+
+const m5Task1Meta = {
+  bunVersion: Bun.version,
+  platform: process.platform,
+  arch: process.arch,
+  date: new Date().toISOString(),
+  milestone: 'milestone-5',
+  task: 'task-1',
+  jitCountersAvailable,
+  rawTimeseriesPath: './raw-timeseries.json',
+  baselineReference: '.chief/milestone-4/_report/task-5/results.json',
+  isolationMethod: 'per-process via Bun.spawn()',
+}
+
+const { scalars: m5B8Scalars, timeSeries: m5B8TimeSeries } = splitSustainedResults(b8Results)
+const { scalars: m5B9Scalars, timeSeries: m5B9TimeSeries } = splitSustainedResults(b9Results)
+
+const m5Task1Payload = {
+  meta: m5Task1Meta,
+  oneShot: results,
+  sustained: {
+    b8: m5B8Scalars,
+    b9: m5B9Scalars,
+  },
+}
+
+const m5Task1TimeseriesPayload = {
+  meta: { date: m5Task1Meta.date, description: 'heapTimeSeries arrays stripped from results.json' },
+  b8: m5B8TimeSeries,
+  b9: m5B9TimeSeries,
+}
+
+await writeReportSplit(m5Task1ReportDir, m5Task1Payload, m5Task1TimeseriesPayload)
+console.log(`\nMilestone-5 task-1 results written to ${m5Task1ReportDir}/results.json`)
 console.log(`(raw-timeseries.json written alongside — gitignored)\n`)
 
 process.exit(0)
