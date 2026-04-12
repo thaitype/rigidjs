@@ -137,6 +137,22 @@ export interface Vec<F extends StructFields> {
    * @throws "unknown column: <name>" if name is not a valid column key.
    */
   column<K extends ColumnKey<F>>(name: K): ColumnType<F, K>
+
+  /**
+   * Iterate over all elements from index 0 to len-1.
+   *
+   * The iterator yields the shared handle rebased to each successive
+   * index. The SAME handle instance is yielded at every step -- users
+   * must NOT store references to the yielded handle past the current
+   * iteration step. Capture primitive values (handle.slot, field values)
+   * if you need them after the loop advances.
+   *
+   * The iterator allocates one iterator object per for..of call.
+   * Each next() call is allocation-free (rebases the existing handle).
+   *
+   * @throws "vec has been dropped" on first call to next() after drop().
+   */
+  [Symbol.iterator](): Iterator<Handle<F>>
 }
 
 // ---------------------------------------------------------------------------
@@ -390,6 +406,24 @@ export function vec<F extends StructFields>(
       // The runtime TypedArray subclass for this column was determined by the column's
       // numeric token at vec construction time and is guaranteed to match ColumnType<F, K>.
       return arr as unknown as ColumnType<F, K>
+    },
+
+    [Symbol.iterator](): Iterator<Handle<F>> {
+      // One iterator object allocated per for..of call.
+      // Each next() call rebases the shared handle — zero allocation per step.
+      let cursor = 0
+      return {
+        next(): IteratorResult<Handle<F>> {
+          assertLive()
+          if (cursor < _len) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is code-generated
+            ;((_handle as any)._rebase(cursor))
+            cursor++
+            return { value: _handle, done: false }
+          }
+          return { value: undefined as unknown as Handle<F>, done: true }
+        },
+      }
     },
   }
 }
