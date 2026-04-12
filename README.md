@@ -114,7 +114,67 @@ That is the whole mental model. Everything else is details.
 
 ## Mental model
 
-RigidJS asks you to keep three things in mind. Once they click, the rest of the API follows.
+RigidJS asks you to keep a few things in mind. Once they click, the rest of the API follows.
+
+### Memory layout — what the buffer actually looks like
+
+Take a tiny struct with just three fields:
+
+```ts
+const Point = struct({
+  x:  'f32',   // 4 bytes
+  y:  'f32',   // 4 bytes
+  hp: 'u8',    // 1 byte
+})
+// sizeof(Point) = 4 + 4 + 1 = 9 bytes
+// Declaration order. No padding. No reordering.
+```
+
+Now allocate storage for three of them:
+
+```ts
+const points = slab(Point, 3)
+```
+
+This allocates **one** `ArrayBuffer` of `9 × 3 = 27` bytes. That's it. Here is the memory, byte by byte:
+
+```
+byte:  0     4     8  9     13    17 18    22    26
+       +-----+-----+--+-----+-----+--+-----+-----+--+
+       |  x  |  y  |hp|  x  |  y  |hp|  x  |  y  |hp|
+       | f32 | f32 |u8| f32 | f32 |u8| f32 | f32 |u8|
+       +-----+-----+--+-----+-----+--+-----+-----+--+
+       |<-- slot 0 -->|<-- slot 1 -->|<-- slot 2 -->|
+```
+
+Three slots, side by side, contiguous. No pointers between them. No wrapper objects. Reading a field is plain arithmetic:
+
+```
+points.get(i).x   =>  DataView.getFloat32(i * 9 + 0)
+points.get(i).y   =>  DataView.getFloat32(i * 9 + 4)
+points.get(i).hp  =>  DataView.getUint8  (i * 9 + 8)
+```
+
+The handle is a tiny accessor class code-generated at `struct()` call time. It does exactly the math above and nothing else — no hash lookups, no hidden classes, no pointer chasing.
+
+**Now compare what the GC sees:**
+
+```
+Plain JS array-of-objects:           RigidJS slab:
+
+  [Array]  <-- heap                    [ArrayBuffer, 27 bytes]  <-- heap
+     |
+     +--> {x,y,hp}  <-- heap            (no child objects,
+     +--> {x,y,hp}  <-- heap             no pointers inside,
+     +--> {x,y,hp}  <-- heap             one allocation total)
+
+  GC tracks: 4 objects                 GC tracks: 1 object
+  Memory:    fragmented                Memory:    contiguous
+  Field:     property lookup           Field:     byte-offset math
+  Growth:    N objects per insert      Growth:    zero allocs per insert
+```
+
+Scale this up to 10,000 particles and the difference goes from "trivia" to "the whole point of the library." Plain JS: 10,001 heap objects, each with a hidden class, scattered across memory, all tracked by the GC. RigidJS: one `ArrayBuffer`, 90,000 bytes, one thing for the GC to look at.
 
 ### Blueprint vs container
 
@@ -143,13 +203,61 @@ The particle example is the best single file to read next. It demonstrates every
 
 ## Benchmarks
 
-Performance is a primary goal, but RigidJS does **not** publish fixed speedup numbers in this README — those go stale, and the comparison depends heavily on the workload. A benchmark harness is included so you can measure on your own machine.
+The elevator-pitch question is "is it actually faster?" The honest answer is: **on mean throughput, no — plain JS wins.** RigidJS is not here to win ops/sec contests. Where it wins is **GC pressure** and **tail latency under sustained load**, and the numbers below are measured, not marketing.
+
+### What milestone-2 observed
+
+Single machine (Apple Silicon, Macbook Pro M4, Bun 1.3.8), one run, no statistical significance claims. Treat the shape of the numbers more than the digits.
+
+**GC pressure — objects the collector must track per container**
+
+| Scenario | Plain JS | RigidJS | Advantage |
+|---|---:|---:|---:|
+| 100k `Vec3` | 100,106 | **315** | ~318× fewer |
+| 50k nested `Particle` | 150,092 | **491** | ~306× fewer |
+| 50k flat `Particle` | 50,096 | **491** | ~102× fewer |
+
+Two orders of magnitude fewer objects for the GC to scan and free. This is the core value proposition.
+
+**Sustained load — 10 seconds of 1k insert + 1k remove + full iterate per tick at 100k capacity**
+
+| Metric | Plain JS | RigidJS | Result |
+|---|---:|---:|---:|
+| Mean tick | 0.193 ms | 0.183 ms | RigidJS ~5% faster |
+| p99 tick | 0.452 ms | 0.343 ms | RigidJS 1.32× |
+| p999 tick | 0.929 ms | 0.635 ms | RigidJS 1.46× |
+| **Max tick** | **18.31 ms** | **5.79 ms** | **RigidJS 3.2×** |
+
+The 18 ms max tick for plain JS is the GC spike. RigidJS's worst tick is a third of that. **Flatter tail, more predictable latency.**
+
+**Scaling — max tick per capacity**
+
+| Capacity | Plain JS max | RigidJS max | Advantage |
+|---:|---:|---:|---:|
+| 10k | 3.85 ms | **0.13 ms** | 30× flatter |
+| 100k | 1.93 ms | **0.99 ms** | 2× flatter |
+| 1M | 7.10 ms | **5.56 ms** | 1.3× flatter |
+
+RigidJS has a flatter tail at every tested capacity — even at 10k, where plain JS wins on raw mean throughput by roughly 2×.
+
+### Where RigidJS loses
+
+- **Mean throughput on one-shot workloads.** Plain JS is consistently faster when the task is "grind numbers and exit." DataView dispatch has real per-op cost.
+- **Small-capacity RSS.** At 10k capacity, RigidJS uses ~524 MB vs plain JS ~134 MB because the slab's fixed bookkeeping dominates when there's nothing to amortize. This inverts near 1M (JS ~620 MB, RigidJS ~454 MB).
+- **Small capacities, workloads without latency SLAs, short-lived scripts.** Use plain JS. Seriously.
+
+### Run it yourself
 
 ```bash
 bun run bench
 ```
 
-The harness lives in `benchmark/` and covers struct creation, insert/remove churn, iteration, nested field access, and sustained-load scaling. Results include CPU time, high-water RSS, and heap pressure. Treat the numbers as signal about shape, not as marketing claims.
+The harness lives in `benchmark/` and covers struct creation, insert/remove churn, iteration, nested field access, and sustained-load scaling. Full writeups and raw results are under [`.chief/milestone-2/_report/`](.chief/milestone-2/_report/) — in particular [`milestone-2-summary.md`](.chief/milestone-2/_report/milestone-2-summary.md) for the narrative and [`task-9/benchmark.md`](.chief/milestone-2/_report/task-9/benchmark.md) for the sustained-load tables.
+
+**The honest pitch is not "RigidJS is faster than JS." It is:**
+1. Two orders of magnitude less GC pressure, measured.
+2. Flatter tail latency under sustained load, measured.
+3. Predictable worst-case ticks, measured.
 
 ---
 
