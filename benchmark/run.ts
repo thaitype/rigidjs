@@ -67,6 +67,7 @@ import { b2VecScenarios } from './scenarios/b2-vec-churn.js'
 import { b3VecHandleScenarios } from './scenarios/b3-vec-handle.js'
 import { b3VecColumnScenarios } from './scenarios/b3-vec-column.js'
 import { b3PartialScenarios } from './scenarios/b3-partial.js'
+import { b3VecGetScenarios } from './scenarios/b3-vec-get.js'
 
 // ---------------------------------------------------------------------------
 // Run all scenarios B1 → B2 → B3 → B3-column → B7 → vec scenarios
@@ -75,7 +76,7 @@ import { b3PartialScenarios } from './scenarios/b3-partial.js'
 const allScenarios = [
   ...b1Scenarios, ...b2Scenarios, ...b3Scenarios, ...b3ColumnScenarios, ...b7Scenarios,
   // milestone-4 vec scenarios
-  ...b1VecScenarios, ...b2VecScenarios, ...b3VecHandleScenarios, ...b3VecColumnScenarios, ...b3PartialScenarios,
+  ...b1VecScenarios, ...b2VecScenarios, ...b3VecHandleScenarios, ...b3VecColumnScenarios, ...b3PartialScenarios, ...b3VecGetScenarios,
 ]
 
 console.log('Running benchmarks...\n')
