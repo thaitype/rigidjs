@@ -370,14 +370,34 @@ export function vec<F extends StructFields>(
 
   // Reusable JS handle (rebased per operation, never allocated per-call).
   // Only used when _mode === 'js'.
+  //
+  // JSHandleClass and _createJSObject are cached on the StructDef (_JSHandle / _JSFactory)
+  // so that the new Function() codegen runs at most once per struct definition across
+  // all vec() calls with the same def. Subsequent vec() calls reuse the cached constructors.
+  if (jsMode) {
+    // Lazy-initialize and cache on the StructDef (same pattern as _columnLayout).
+    // The cast to `any` is required because _JSHandle / _JSFactory are mutable internal fields.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
+    if (!(def as any)._JSHandle) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
+      ;(def as any)._JSHandle = generateJSHandleClass(def.fields)
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
+    if (!(def as any)._JSFactory) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
+      ;(def as any)._JSFactory = generateJSObjectFactory(def.fields)
+    }
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSHandleConstructor returns `object`; any isolates the bridge
-  const JSHandleClass = jsMode ? generateJSHandleClass(def.fields) : (null as any)
+  const JSHandleClass = jsMode ? (def as any)._JSHandle : (null as any)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let _jsHandle: any = jsMode ? new (JSHandleClass as any)({}) : null
 
   // Factory function to create JS objects with stable hidden class.
   // Only used when _mode === 'js'.
-  const _createJSObject: (() => object) | null = jsMode ? generateJSObjectFactory(def.fields) : null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
+  const _createJSObject: (() => object) | null = jsMode ? (def as any)._JSFactory : null
 
   // ---------------------------------------------------------------------------
   // SoA mode state
