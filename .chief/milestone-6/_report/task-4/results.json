@@ -1,0 +1,156 @@
+{
+  "meta": {
+    "bunVersion": "1.3.8",
+    "platform": "darwin",
+    "arch": "arm64",
+    "date": "2026-04-15",
+    "milestone": "M6",
+    "note": "Per-process isolated runs. Each scenario run individually via bun run bench -s <name>."
+  },
+  "oneShot": [
+    {
+      "scenario": "B1-slab",
+      "description": "100k struct creation",
+      "js": { "name": "B1 JS baseline (100k {x,y,z} alloc)", "opsPerSec": 570 },
+      "rigid": { "name": "B1 RigidJS slab (100k inserts)", "opsPerSec": 298 },
+      "ratio": 0.52
+    },
+    {
+      "scenario": "B2-slab",
+      "description": "10k insert+remove churn per frame",
+      "js": { "name": "B2 JS baseline (10k insert+remove/frame)", "opsPerSec": 6304 },
+      "rigid": { "name": "B2 RigidJS slab (10k insert+remove/frame)", "opsPerSec": 6922 },
+      "ratio": 1.10
+    },
+    {
+      "scenario": "B3-iterate",
+      "description": "100k slab forEach h.pos.x += h.vel.x",
+      "js": { "name": "B3 JS baseline (100k pos.x += vel.x)", "opsPerSec": 4199 },
+      "rigid": { "name": "B3 RigidJS slab (100k h.pos.x += h.vel.x)", "opsPerSec": 3222 },
+      "ratio": 0.77
+    },
+    {
+      "scenario": "B3-column",
+      "description": "100k slab column access posX[i] += velX[i]",
+      "js": { "name": "B3 JS baseline (100k pos.x += vel.x)", "opsPerSec": 4199 },
+      "rigid": { "name": "B3-column RigidJS slab (100k column posX[i] += velX[i])", "opsPerSec": 19848 },
+      "ratio": 4.73
+    },
+    {
+      "scenario": "B7-nested",
+      "description": "50k nested struct creation",
+      "js": { "name": "B7 JS nested (50k {pos:{x,y,z},vel:{x,y,z},life,id})", "opsPerSec": 576 },
+      "rigid": { "name": "B7 RigidJS nested struct (50k Particle slab)", "opsPerSec": 258 },
+      "ratio": 0.45
+    },
+    {
+      "scenario": "B1-vec",
+      "description": "100k vec push creation",
+      "js": { "name": "B1-vec JS baseline (100k {x,y,z} alloc)", "opsPerSec": 780 },
+      "rigid": { "name": "B1-vec RigidJS vec (100k push)", "opsPerSec": 61 },
+      "ratio": 0.08
+    },
+    {
+      "scenario": "B2-vec",
+      "description": "10k push+swapRemove churn per frame (M6 swapRemove codegen optimization applied)",
+      "js": { "name": "B2-vec JS baseline (10k push/splice churn)", "opsPerSec": 10049 },
+      "rigid": { "name": "B2-vec RigidJS vec (10k push+swapRemove/frame)", "opsPerSec": 28415 },
+      "ratio": 2.83
+    },
+    {
+      "scenario": "B3-vec-handle",
+      "description": "100k vec for..of handle h.pos.x += h.vel.x",
+      "js": { "name": "B3-vec-handle JS baseline (100k pos.x += vel.x)", "opsPerSec": 3225 },
+      "rigid": { "name": "B3-vec-handle RigidJS vec (100k for..of h.pos.x += h.vel.x)", "opsPerSec": 1548 },
+      "ratio": 0.48
+    },
+    {
+      "scenario": "B3-vec-column",
+      "description": "100k vec column posX[i] += velX[i]",
+      "js": { "name": "B3-vec-column JS baseline (100k pos.x += vel.x)", "opsPerSec": 4568 },
+      "rigid": { "name": "B3-vec-column RigidJS vec (100k column posX[i] += velX[i])", "opsPerSec": 7647 },
+      "ratio": 1.67
+    },
+    {
+      "scenario": "B3-vec-get",
+      "description": "100k vec indexed get h.pos.x += h.vel.x (N=100k)",
+      "js": { "name": "B3-vec-get JS baseline (100k pos.x += vel.x)", "opsPerSec": 4309 },
+      "rigid": { "name": "B3-vec-get RigidJS vec (100k indexed get h.pos.x += h.vel.x)", "opsPerSec": 10971 },
+      "ratio": 2.55
+    },
+    {
+      "scenario": "B3-vec-forEach",
+      "description": "100k vec forEach h.pos.x += h.vel.x",
+      "js": { "name": "B3-vec-forEach JS baseline (100k pos.x += vel.x)", "opsPerSec": 3250 },
+      "rigid": { "name": "B3-vec-forEach RigidJS vec (100k forEach h.pos.x += h.vel.x)", "opsPerSec": 3742 },
+      "ratio": 1.15
+    },
+    {
+      "scenario": "B3-slab-forEach",
+      "description": "100k slab forEach h.pos.x += h.vel.x",
+      "js": { "name": "B3-slab-forEach JS baseline (100k pos.x += vel.x)", "opsPerSec": 3960 },
+      "rigid": { "name": "B3-slab-forEach RigidJS slab (100k forEach h.pos.x += h.vel.x)", "opsPerSec": 3862 },
+      "ratio": 0.98
+    },
+    {
+      "scenario": "B1-small-scale",
+      "description": "Creation at small N",
+      "results": [
+        { "label": "slab N=10", "js": 1582384, "rigid": 173100, "ratio": 0.11 },
+        { "label": "vec N=10", "js": 1582384, "rigid": 44338, "ratio": 0.03 },
+        { "label": "slab N=100", "js": 245424, "rigid": 127395, "ratio": 0.52 },
+        { "label": "vec N=100", "js": 245424, "rigid": 17536, "ratio": 0.07 },
+        { "label": "slab N=1000", "js": 53795, "rigid": 39647, "ratio": 0.74 },
+        { "label": "vec N=1000", "js": 53795, "rigid": 7707, "ratio": 0.14 }
+      ]
+    },
+    {
+      "scenario": "B2-small-scale",
+      "description": "Churn at small N (M6 swapRemove codegen applied to vec)",
+      "results": [
+        { "label": "slab N=10", "js": 480192, "rigid": 121507, "ratio": 0.25 },
+        { "label": "vec N=10", "js": 480192, "rigid": 344036, "ratio": 0.72 },
+        { "label": "slab N=100", "js": 466564, "rigid": 158072, "ratio": 0.34 },
+        { "label": "vec N=100", "js": 466564, "rigid": 368551, "ratio": 0.79 },
+        { "label": "slab N=1000", "js": 67927, "rigid": 11014, "ratio": 0.16 },
+        { "label": "vec N=1000", "js": 67927, "rigid": 45411, "ratio": 0.67 }
+      ]
+    },
+    {
+      "scenario": "B3-small-scale",
+      "description": "Iteration at small N",
+      "results": [
+        { "label": "vec indexed N=10", "js": 5211047, "rigid": 7019391, "ratio": 1.35 },
+        { "label": "vec column N=10", "js": 5211047, "rigid": 14171833, "ratio": 2.72 },
+        { "label": "vec indexed N=100", "js": 4391101, "rigid": 493784, "ratio": 0.11 },
+        { "label": "vec column N=100", "js": 4391101, "rigid": 5804531, "ratio": 1.32 },
+        { "label": "vec indexed N=1000", "js": 499822, "rigid": 40977, "ratio": 0.08 },
+        { "label": "vec column N=1000", "js": 499822, "rigid": 723659, "ratio": 1.45 }
+      ]
+    }
+  ],
+  "sustained": {
+    "b8Slab": {
+      "js": { "name": "B8 JS baseline", "ticks": 25080, "p99Ms": 0.5327 },
+      "rigid": { "name": "B8 RigidJS slab", "ticks": 57718, "p99Ms": 0.2775 },
+      "tickRatio": 2.30,
+      "p99Ratio": 1.92
+    },
+    "b8Vec": {
+      "js": { "name": "B8-vec JS baseline", "ticks": 27240, "p99Ms": 0.3705 },
+      "rigid": { "name": "B8-vec RigidJS vec", "ticks": 167436, "p99Ms": 0.0728 },
+      "tickRatio": 6.15,
+      "p99Ratio": 5.09
+    },
+    "b9Slab": [
+      { "cap": 10000, "jsTicks": 106324, "rigidTicks": 113974, "tickRatio": 1.07, "jsP99": 0.0458, "rigidP99": 0.0270, "p99Ratio": 1.70 },
+      { "cap": 100000, "jsTicks": 9439, "rigidTicks": 9596, "tickRatio": 1.02, "jsP99": 0.5222, "rigidP99": 0.2437, "p99Ratio": 2.14 },
+      { "cap": 1000000, "jsTicks": 828, "rigidTicks": 945, "tickRatio": 1.14, "jsP99": 4.1791, "rigidP99": 2.5838, "p99Ratio": 1.62 }
+    ],
+    "b9Vec": [
+      { "cap": 10000, "jsTicks": 112009, "rigidTicks": 227530, "tickRatio": 2.03, "jsP99": 0.0335, "rigidP99": 0.0247, "p99Ratio": 1.36 },
+      { "cap": 100000, "jsTicks": 8499, "rigidTicks": 20229, "tickRatio": 2.41, "jsP99": 0.6953, "rigidP99": 0.3283, "p99Ratio": 2.12 },
+      { "cap": 1000000, "jsTicks": 552, "rigidTicks": 1954, "tickRatio": 3.55, "jsP99": 14.1019, "rigidP99": 2.5057, "p99Ratio": 5.63 }
+    ]
+  }
+}

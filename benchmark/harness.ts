@@ -555,14 +555,14 @@ export async function benchSustained(scenario: SustainedScenario): Promise<Susta
   Bun.gc(true)
   await Bun.sleep(100)
 
-  // 6. Pre-size latency buffer — hard cap at Math.ceil(durationMs * 100) entries.
+  // 6. Pre-size latency buffer — hard cap at Math.ceil(durationMs * 1000) entries.
   //    Spec originally specified durationMs * 2 (~2000 ticks/sec headroom), but
   //    on Apple M-series hardware small-capacity scenarios complete ticks in
-  //    <0.025ms (>40000 ticks/sec), so the multiplier is bumped to 100
-  //    (~100000 ticks/sec ceiling) to keep the "plenty of headroom" intent
+  //    <0.025ms (>40000 ticks/sec), so the multiplier is bumped to 1000
+  //    (~1000000 ticks/sec ceiling) to keep the "plenty of headroom" intent
   //    intact across all B8/B9 capacities. Throw on overflow rather than
   //    silently grow or truncate.
-  const maxTicks = Math.ceil(scenario.durationMs * 100)
+  const maxTicks = Math.ceil(scenario.durationMs * 1000)
   const latencies = new Float64Array(maxTicks)
   let ticksCompleted = 0
 
@@ -594,7 +594,7 @@ export async function benchSustained(scenario: SustainedScenario): Promise<Susta
       throw new Error(
         `[benchSustained] Latency buffer overflow for scenario "${scenario.name}": ` +
           `tick count ${ticksCompleted} exceeds pre-sized buffer cap of ${maxTicks} ` +
-          `(Math.ceil(durationMs * 100) = Math.ceil(${scenario.durationMs} * 100)).`,
+          `(Math.ceil(durationMs * 1000) = Math.ceil(${scenario.durationMs} * 1000)).`,
       )
     }
 
