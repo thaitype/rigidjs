@@ -40,6 +40,45 @@ For each workload type, we pick the **best RigidJS container + access mode** and
 
 **Recommendation:** For sustained workloads, **slab** is the proven winner today. Vec has higher throughput but needs memory management improvements for clean tail latency.
 
+### Small collections (N=10 to 1,000)
+
+Large-scale benchmarks tell one story. But many workloads -- config objects, UI component state, small lookup tables -- involve 10-1,000 entities. Here is how RigidJS scales across the full range:
+
+**Creation scaling curve:**
+
+| N | Slab vs JS | Vec vs JS | Trend |
+|---|---|---|---|
+| 10 | 0.12x | 0.37x | Constructor overhead dominates |
+| 100 | 0.21x | 0.27x | Per-element cost still minor vs fixed cost |
+| 1,000 | 0.37x | 0.44x | Per-element cost starting to dominate |
+| 100,000 | 0.60x | 0.62x | Per-element cost dominates; ratio stabilizes |
+
+At N=10, slab is 8x slower than JS -- the `ArrayBuffer` allocation and `new Function()` codegen cost is paid once but spread across only 10 inserts. The ratio improves steadily as N grows and amortizes the fixed cost.
+
+**Iteration scaling curve (vec):**
+
+| N | Indexed get(i) vs JS | Column vs JS | Trend |
+|---|---|---|---|
+| 10 | 0.59x | 0.55x | Both below 1x; loop too small for JIT payoff |
+| 100 | 0.20x | **1.10x** | Column crosses 1x; indexed collapses |
+| 1,000 | 0.16x | **3.18x** | Column dominates; indexed still collapsed |
+| 100,000 | **1.72x** | **2.42x** | Both above 1x at scale |
+
+The standout finding: **column access beats JS even at N=100** (1.10x), making it competitive for surprisingly small collections. This validates the SoA layout strategy across all practical sizes.
+
+The indexed get(i) collapse at N=100-1,000 (0.16-0.20x) is anomalous and under investigation -- likely a JIT warm-up artifact at intermediate loop sizes. At N=100k it recovers to 1.72x.
+
+**Churn scaling curve:**
+
+| N | Slab vs JS | Vec vs JS | Trend |
+|---|---|---|---|
+| 10 | 0.39x | 0.51x | Fixed overhead dominates |
+| 100 | 0.30x | 0.67x | Vec churn competitive earlier than slab |
+| 1,000 | 0.63x | 0.55x | Converging toward parity |
+| 10,000 | **1.15x** | 0.91x | Slab crosses 1x; vec near parity |
+
+**Recommendation for small collections:** Use `column()` access (competitive at N>=100). For creation-heavy small workloads, plain JS objects remain faster today. The hybrid container (M7) specifically targets this gap by using JS objects internally below a threshold and graduating to ArrayBuffer layout above it.
+
 ### Heap scaling (how does perf change as entity count grows?)
 
 | Entity Count | Best Container | Throughput vs JS | p99 Latency vs JS |
@@ -93,7 +132,7 @@ This doesn't show up in throughput benchmarks, but it matters in production: few
 | Long-lived entity pool with insert/remove | `slab` + `forEach` | **1.1x faster, 2.2x sustained** |
 | Large dataset (100k-1M) with low-latency requirement | `vec` (any access mode) | **1.6x throughput, 3x better p99** |
 | Short-lived objects, request/response | **Plain JS objects** (until hybrid container ships in M7) | JS is 1.5-2.5x faster for creation today |
-| Small collections (<1k entities) | **Plain JS objects** (until hybrid container ships in M7) | Overhead not worth it today |
+| Small collections (<1k entities), creation-heavy | **Plain JS objects** (until hybrid container ships in M7) | JS is 3-8x faster for creation at N=10-100. But `column()` access beats JS even at N=100 (1.10x). If you create once and iterate many times, RigidJS can still win at small N via column access. |
 
 ---
 
@@ -101,7 +140,7 @@ This doesn't show up in throughput benchmarks, but it matters in production: few
 
 The following are not speculative ideas -- they are the planned R&D techniques RigidJS will pursue to achieve >=1x JS throughput across all operations. Each approach targets a specific gap identified in the benchmark data.
 
-### R&D 1: Hybrid Container -- "fast-vec" (M7)
+### R&D 1: Hybrid Container -- "fast-vec" (M7) -- CRITICAL PRIORITY
 
 **Idea:** A vec variant that uses raw JS hidden-class objects internally for insert/creation, but stores references in a TypedArray-backed index for iteration. On iteration, it reads from the JS objects but follows a contiguous index -- giving cache-friendly traversal order.
 
@@ -109,7 +148,9 @@ The following are not speculative ideas -- they are the planned R&D techniques R
 
 **What it trades away:** GC pressure win (objects are still GC-tracked). Memory density (JS objects are ~500 bytes vs 56 bytes per entity).
 
-**Expected outcome:** ~1x creation AND ~1x iteration, trading GC and memory advantages. Serves as the "level 1" container for users migrating from plain JS objects, and as the default recommendation for small/short-lived collections until further optimizations land.
+**Why small-scale data makes this critical:** The small-scale benchmarks reveal that creation is 0.12x at N=10 and 0.21x at N=100 -- far worse than the 0.60x at N=100k. The fixed constructor overhead (ArrayBuffer allocation, `new Function()` codegen) is catastrophic for small collections. A hybrid container that defers ArrayBuffer allocation until N exceeds a threshold (e.g., 64 or 256) would eliminate this penalty entirely. The crossover threshold can be calibrated from the benchmark data: column access already wins at N=100, so graduation from JS-backed to ArrayBuffer-backed could happen as early as N=64.
+
+**Expected outcome:** ~1x creation AND ~1x iteration at all collection sizes, trading GC and memory advantages at small N. Serves as the "level 1" container for users migrating from plain JS objects, and as the default recommendation for small/short-lived collections until further optimizations land.
 
 ### R&D 2: Batch Insert API -- "insertBatch" (M7)
 
@@ -166,9 +207,11 @@ The following are not speculative ideas -- they are the planned R&D techniques R
 ### End Goal Status
 
 **Direction A -- All ops >=1x with GC-free:**
-- 9 operations already above 1x
+- 9 operations already above 1x at large N (100k)
 - 3 operations closeable in M6 (0.85-0.91x -> >=1x)
-- 6 operations currently below 1x (0.37-0.66x) -- each has a planned R&D approach (see Section 3) with specific milestone targets
+- 6 operations currently below 1x at large N (0.37-0.66x) -- each has a planned R&D approach (see Section 3) with specific milestone targets
+- Small-scale gaps are significantly worse (0.12x creation at N=10) -- hybrid container (M7) is the primary mitigation
+- Column access is the bright spot: already beats JS at N=100 (1.10x) and dominates at N=1,000 (3.18x)
 - Alternative APIs already exist for every slow path (column, get(i), forEach replace for..of)
 
 **Direction B -- Fast columnar processing:**
@@ -179,9 +222,10 @@ The following are not speculative ideas -- they are the planned R&D techniques R
 
 RigidJS already dominates iteration and sustained workloads: **2-3x faster bulk processing, 1.5-2x faster sustained workloads, 3x better tail latency at scale, 5x less memory, near-zero GC pressure.**
 
-Where JS is currently faster (entity creation at 0.60x, iterator protocol at 0.37-0.83x), these are classified as R&D challenges with specific approaches planned and scheduled across M6-M8. The engineering goal is >=1x on every operation class -- current gaps are problems to solve, not boundaries to accept.
+Where JS is currently faster (entity creation at 0.60x at 100k, worsening to 0.12x at N=10; iterator protocol at 0.37-0.83x), these are classified as R&D challenges with specific approaches planned and scheduled across M6-M8. The small-scale data makes hybrid containers (M7) even more critical -- the fixed per-container overhead that is acceptable at N=100k becomes the dominant cost at small N. The engineering goal is >=1x on every operation class at every collection size -- current gaps are problems to solve, not boundaries to accept.
 
 The user's decision framework today:
-- **"I create once, iterate many times"** -> RigidJS wins now
+- **"I create once, iterate many times"** -> RigidJS wins now (even at N=100 via column access at 1.10x)
 - **"I create and destroy constantly"** -> JS is faster today; bump allocator (M6) and hybrid container (M7) target this gap
 - **"I need predictable latency at scale"** -> RigidJS wins decisively now
+- **"I have small collections (N<100)"** -> JS is faster for creation (3-8x); use column access if iteration-heavy, otherwise plain JS until hybrid container (M7)

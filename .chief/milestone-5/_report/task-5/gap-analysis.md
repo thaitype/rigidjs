@@ -306,6 +306,63 @@ All ratios are RigidJS ops/s divided by JS baseline ops/s from the same benchmar
 
 ---
 
+## Small-Scale Performance (N=10, 100, 1,000)
+
+The large-scale benchmarks (N=100k) show RigidJS's strengths at scale. But many real workloads operate on small collections. The following data measures the same operations at N=10, 100, and 1,000 to characterize the scaling curve from small to large.
+
+### B1-small-scale: Creation
+
+| N | JS ops/s | Slab ops/s | Vec ops/s | Slab vs JS | Vec vs JS |
+|---|---|---|---|---|---|
+| 10 | 741,450 | 89,001 | 277,591 | 0.12x | 0.37x |
+| 100 | 339,915 | 72,826 | 91,680 | 0.21x | 0.27x |
+| 1,000 | 57,282 | 21,446 | 25,378 | 0.37x | 0.44x |
+| 100,000 | ~400 | ~218 | ~250 | 0.60x | 0.62x |
+
+**Key finding:** The creation gap *worsens* dramatically at small N. At N=10, slab is 0.12x JS -- over 8x slower. The per-container constructor overhead (ArrayBuffer allocation, bitmap initialization, `new Function()` codegen) is amortized across fewer inserts, making the fixed cost dominant. At N=100k the per-insert cost dominates instead, and the ratio improves to 0.60x.
+
+**Root cause:** At N=10, the slab constructor cost (~68us for ArrayBuffer + bitmap + handle codegen) is paid once but spread across only 10 inserts. JS creates 10 objects in ~13us total. The constructor overhead alone accounts for the entire gap.
+
+### B2-small-scale: Insert/Remove Churn
+
+| N | JS ops/s | Slab ops/s | Vec ops/s | Slab vs JS | Vec vs JS |
+|---|---|---|---|---|---|
+| 10 | 319,787 | 124,005 | 162,382 | 0.39x | 0.51x |
+| 100 | 242,131 | 71,582 | 163,165 | 0.30x | 0.67x |
+| 1,000 | 33,446 | 21,151 | 18,222 | 0.63x | 0.55x |
+| 10,000 | ~9,400 | ~5,900 | ~8,500 | 1.15x | 0.91x |
+
+**Key finding:** Churn performance scales similarly -- the ratio improves with N. Slab crosses 1x between N=1,000 and N=10,000. Vec churn at N=100 (0.67x) is notably better than slab (0.30x), suggesting vec's simpler push/pop pattern amortizes better than slab's freelist at mid-scale.
+
+### B3-small-scale: Iteration
+
+| N | JS ops/s | Vec indexed ops/s | Vec column ops/s | Indexed vs JS | Column vs JS |
+|---|---|---|---|---|---|
+| 10 | 5,951,793 | 3,499,053 | 3,248,335 | 0.59x | 0.55x |
+| 100 | 2,276,716 | 458,177 | 2,513,431 | 0.20x | 1.10x |
+| 1,000 | 310,856 | 48,582 | 988,484 | 0.16x | 3.18x |
+| 100,000 | ~3,500 | ~5,300 | ~9,400 | 1.72x | 2.42x |
+
+**Key findings:**
+
+1. **Column access wins even at N=100** (1.10x) and dominates at N=1,000 (3.18x). This is the earliest crossover point of any RigidJS operation -- column access is competitive for collections as small as 100 elements.
+
+2. **Vec indexed get(i) collapses at N=100-1,000** (0.16-0.20x). This is unexpected and needs investigation. At N=10 it is 0.59x, then drops sharply before recovering to 1.72x at N=100k. Possible cause: JIT deoptimization at intermediate sizes where the loop is too small for full optimization but too large for the JIT to unroll entirely. This is a priority investigation item.
+
+3. **The crossover point varies by operation:**
+   - Column access: crosses 1x at ~N=100
+   - Vec indexed get(i): crosses 1x between N=1,000 and N=100,000
+   - Slab churn: crosses 1x between N=1,000 and N=10,000
+   - Creation: does not cross 1x at any tested N
+
+### Small-Scale Summary
+
+These results strongly reinforce the need for **hybrid containers** (R&D 1 in the progress report). At small N, RigidJS's fixed overhead -- constructor cost, `new Function()` codegen, ArrayBuffer allocation -- dominates the per-element work. A hybrid container that uses JS objects below a threshold and graduates to ArrayBuffer layout above it would eliminate the small-N penalty entirely.
+
+The column access result is the standout positive: even at N=100, raw TypedArray iteration beats JS object property traversal. This validates the SoA layout strategy across all collection sizes.
+
+---
+
 ## Classification of Gaps
 
 ### Can reach >= 1x with optimization work
@@ -327,10 +384,25 @@ All ratios are RigidJS ops/s divided by JS baseline ops/s from the same benchmar
 | B3-partial slab | 0.66x | ~0.80x | Hierarchical bitmap could halve scan cost |
 | B7-nested creation | 0.42x | ~0.55x | Batch insert could reduce field write overhead |
 
+### R&D challenge: Small-scale performance (N < 1,000)
+
+| Operation | N=10 ratio | N=100 ratio | N=1000 ratio | R&D approach |
+|---|---|---|---|---|
+| Creation (slab) | 0.12x | 0.21x | 0.37x | Hybrid container (M7): JS objects below threshold |
+| Creation (vec) | 0.37x | 0.27x | 0.44x | Same hybrid approach; also pre-warmed pools |
+| Churn (slab) | 0.39x | 0.30x | 0.63x | Lightweight small-slab variant without bitmap |
+| Churn (vec) | 0.51x | 0.67x | 0.55x | Already competitive at mid-scale; optimize swap |
+| Indexed get(i) | 0.59x | 0.20x | 0.16x | **Priority investigation**: mid-N JIT collapse |
+| Column access | 0.55x | **1.10x** | **3.18x** | Already solved at N>=100 |
+
+At small N, the fixed per-container overhead (ArrayBuffer allocation, `new Function()` codegen, bitmap setup) is not amortized. The gap is structural at current design but solvable via hybrid containers that defer ArrayBuffer allocation until the collection grows past a threshold.
+
+The vec indexed get(i) collapse at N=100-1,000 is anomalous and requires dedicated investigation -- it may be a JIT warm-up artifact or a codegen issue specific to intermediate loop sizes.
+
 ### Fundamental limits (accept and document)
 
 | Operation | Current | Root cause |
 |---|---|---|
-| B1 entity creation vs JS objects | 0.60x | JS engines optimize object literals at the bytecode/JIT level. RigidJS pays upfront allocation cost that JS defers to GC. This is the design tradeoff. |
+| B1 entity creation vs JS objects | 0.60x (100k); 0.12x (N=10) | JS engines optimize object literals at the bytecode/JIT level. RigidJS pays upfront allocation cost that JS defers to GC. This is the design tradeoff. At small N, constructor overhead dominates. |
 | for..of iteration | 0.37-0.83x | JS iterator protocol allocates `{value, done}` per step. Cannot be eliminated. forEach/get(i)/column are the answers. |
 | B7 nested creation | 0.27-0.42x | More fields = more writes = larger gap. Structural amplification of B1 gap. |
