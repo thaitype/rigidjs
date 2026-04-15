@@ -325,6 +325,20 @@ export function vec<F extends StructFields>(
   let _len = 0
   let _dropped = false
 
+  // ---------------------------------------------------------------------------
+  // Mode dispatch — GATE EXPERIMENT (milestone-7 task-1)
+  //
+  // _mode is initialized once at construction to 'soa' and never changed.
+  // This makes it a compile-time constant from the JIT's perspective after
+  // warmup: the branch prediction sees a monomorphic path and the dead 'js'
+  // branch is elided. The experiment measures whether this branch adds any
+  // measurable overhead at large scale (>2% regression = FAIL).
+  //
+  // The else path throws intentionally — it will never execute during benchmarks
+  // or tests. If _mode were ever set to 'js' it would hit an unimplemented guard.
+  // ---------------------------------------------------------------------------
+  const _mode: 'soa' | 'js' = 'soa'
+
   // Helper created once at vec() call time — single closure allocation, not per-call.
   function assertLive(): void {
     if (_dropped) throw new Error('vec has been dropped')
@@ -383,61 +397,81 @@ export function vec<F extends StructFields>(
   // ---------------------------------------------------------------------------
   return {
     push(): Handle<F> {
-      assertLive()
-      if (_len >= _capacity) {
-        grow()
+      if (_mode === 'soa') {
+        assertLive()
+        if (_len >= _capacity) {
+          grow()
+        }
+        const slot = _len
+        _len++
+        // SoA _rebase takes only (slot) — no DataView, no byte offset.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated and not in static TS type
+        ;((_handle as any)._rebase(slot))
+        return _handle
+      } else {
+        throw new Error('not implemented: js mode')
       }
-      const slot = _len
-      _len++
-      // SoA _rebase takes only (slot) — no DataView, no byte offset.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated and not in static TS type
-      ;((_handle as any)._rebase(slot))
-      return _handle
     },
 
     pop(): void {
-      assertLive()
-      if (_len === 0) {
-        throw new Error('vec is empty')
+      if (_mode === 'soa') {
+        assertLive()
+        if (_len === 0) {
+          throw new Error('vec is empty')
+        }
+        _len--
+      } else {
+        throw new Error('not implemented: js mode')
       }
-      _len--
     },
 
     get(index: number): Handle<F> {
-      assertLive()
-      if (index < 0 || index >= _len) {
-        throw new Error('index out of range')
+      if (_mode === 'soa') {
+        assertLive()
+        if (index < 0 || index >= _len) {
+          throw new Error('index out of range')
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- same bridge as push()
+        ;((_handle as any)._rebase(index))
+        return _handle
+      } else {
+        throw new Error('not implemented: js mode')
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- same bridge as push()
-      ;((_handle as any)._rebase(index))
-      return _handle
     },
 
     swapRemove(index: number): void {
-      assertLive()
-      if (index < 0 || index >= _len) {
-        throw new Error('index out of range')
+      if (_mode === 'soa') {
+        assertLive()
+        if (index < 0 || index >= _len) {
+          throw new Error('index out of range')
+        }
+        // Copy all column values from last element into index.
+        // When index === _len - 1, this is a self-assignment (harmless).
+        // _swapFn is a codegen-unrolled function (generated via new Function() at
+        // construction/growth time) that writes each column directly without a loop.
+        _swapFn(index, _len - 1)
+        _len--
+      } else {
+        throw new Error('not implemented: js mode')
       }
-      // Copy all column values from last element into index.
-      // When index === _len - 1, this is a self-assignment (harmless).
-      // _swapFn is a codegen-unrolled function (generated via new Function() at
-      // construction/growth time) that writes each column directly without a loop.
-      _swapFn(index, _len - 1)
-      _len--
     },
 
     remove(index: number): void {
-      assertLive()
-      if (index < 0 || index >= _len) {
-        throw new Error('index out of range')
+      if (_mode === 'soa') {
+        assertLive()
+        if (index < 0 || index >= _len) {
+          throw new Error('index out of range')
+        }
+        // Shift all elements after index left by one position.
+        // TypedArray.copyWithin handles overlapping ranges correctly.
+        // Use pre-extracted _columnArrays to avoid Map.get() per column per call.
+        for (let c = 0; c < _columnArrays.length; c++) {
+          _columnArrays[c]!.copyWithin(index, index + 1, _len)
+        }
+        _len--
+      } else {
+        throw new Error('not implemented: js mode')
       }
-      // Shift all elements after index left by one position.
-      // TypedArray.copyWithin handles overlapping ranges correctly.
-      // Use pre-extracted _columnArrays to avoid Map.get() per column per call.
-      for (let c = 0; c < _columnArrays.length; c++) {
-        _columnArrays[c]!.copyWithin(index, index + 1, _len)
-      }
-      _len--
     },
 
     get len(): number {
@@ -478,31 +512,39 @@ export function vec<F extends StructFields>(
     },
 
     [Symbol.iterator](): Iterator<Handle<F>> {
-      // One iterator object allocated per for..of call.
-      // Each next() call rebases the shared handle — zero allocation per step.
-      let cursor = 0
-      return {
-        next(): IteratorResult<Handle<F>> {
-          assertLive()
-          if (cursor < _len) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is code-generated
-            ;((_handle as any)._rebase(cursor))
-            cursor++
-            return { value: _handle, done: false }
-          }
-          return { value: undefined as unknown as Handle<F>, done: true }
-        },
+      if (_mode === 'soa') {
+        // One iterator object allocated per for..of call.
+        // Each next() call rebases the shared handle — zero allocation per step.
+        let cursor = 0
+        return {
+          next(): IteratorResult<Handle<F>> {
+            assertLive()
+            if (cursor < _len) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is code-generated
+              ;((_handle as any)._rebase(cursor))
+              cursor++
+              return { value: _handle, done: false }
+            }
+            return { value: undefined as unknown as Handle<F>, done: true }
+          },
+        }
+      } else {
+        throw new Error('not implemented: js mode')
       }
     },
 
     forEach(cb: (handle: Handle<F>, index: number) => void): void {
-      assertLive()
-      // Internal counted loop — no iterator protocol, no per-call allocation.
-      // Reuses the single shared handle instance by rebasing it to each index.
-      for (let i = 0; i < _len; i++) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated and not in static TS type
-        ;((_handle as any)._rebase(i))
-        cb(_handle, i)
+      if (_mode === 'soa') {
+        assertLive()
+        // Internal counted loop — no iterator protocol, no per-call allocation.
+        // Reuses the single shared handle instance by rebasing it to each index.
+        for (let i = 0; i < _len; i++) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated and not in static TS type
+          ;((_handle as any)._rebase(i))
+          cb(_handle, i)
+        }
+      } else {
+        throw new Error('not implemented: js mode')
       }
     },
 
