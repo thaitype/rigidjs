@@ -2,7 +2,7 @@ import type { StructDef, StructFields, Handle, ColumnKey, ColumnType } from '../
 import { computeColumnLayout } from '../struct/layout.js'
 import { generateSoAHandleClass } from '../struct/handle-codegen.js'
 import type { ColumnRef } from '../struct/handle-codegen.js'
-import { generateJSObjectFactory, generateJSHandleClass } from './js-codegen.js'
+import { generateJSObjectFactory, generateJSHandleClass, generateCopyToColumnsFn } from './js-codegen.js'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -183,6 +183,33 @@ export interface Vec<F extends StructFields> {
    * @throws "vec.reserve: n must be a positive integer" for invalid input.
    */
   reserve(n: number): void
+
+  /**
+   * The current storage mode: 'js' (plain JS objects) or 'soa' (TypedArray columns).
+   *
+   * Starts as 'js' when no initialCapacity is given, and transitions to 'soa'
+   * automatically when len reaches the graduation threshold (default 128),
+   * or immediately when .graduate() or .column() is called.
+   *
+   * Once 'soa', the mode never reverts to 'js'.
+   */
+  readonly mode: 'js' | 'soa'
+
+  /**
+   * True when the vec has graduated to SoA mode (mode === 'soa').
+   */
+  readonly isGraduated: boolean
+
+  /**
+   * Force immediate graduation from JS mode to SoA mode, regardless of current len.
+   * No-op if already in SoA mode.
+   *
+   * After graduation:
+   * - buffer is accessible
+   * - column() returns TypedArrays directly
+   * - All JS object data is preserved and readable via SoA handles
+   */
+  graduate(): void
 }
 
 // ---------------------------------------------------------------------------
@@ -243,9 +270,14 @@ export function vec<F extends StructFields>(
 
   let _len = 0
   let _dropped = false
-  // Mode is set at construction time based on whether initialCapacity was provided.
-  // In this task, mode is fixed for the lifetime of the vec (graduation is task-3).
-  const _mode: 'soa' | 'js' = jsMode ? 'js' : 'soa'
+  // Mode starts as 'js' when no initialCapacity is given.
+  // Transitions to 'soa' on graduation (auto at threshold, or explicit .graduate()/.column()).
+  // Once 'soa', never reverts to 'js'.
+  let _mode: 'soa' | 'js' = jsMode ? 'js' : 'soa'
+
+  // Default graduation threshold. JS mode automatically promotes to SoA when len >= this.
+  // Configurable via options API in task-4; hardcoded here per task-3 spec.
+  const _graduateAt = 128
 
   // Helper created once at vec() call time — single closure allocation, not per-call.
   function assertLive(): void {
@@ -413,6 +445,53 @@ export function vec<F extends StructFields>(
     _handle = new (HandleClass as any)(0) as Handle<F>
   }
 
+  /**
+   * Transition from JS mode to SoA mode (graduation).
+   *
+   * Steps:
+   *  1. Compute initial SoA capacity: max(_len * 2, DEFAULT_CAPACITY) — give room to grow.
+   *  2. Allocate ArrayBuffer(layout.sizeofPerSlot * soaCapacity).
+   *  3. buildColumns(newBuf, soaCapacity) — builds TypedArray views and columnRefs.
+   *  4. Copy data from _items JS objects into columns via codegen'd copyToColumns function.
+   *  5. Generate SoA handle class via generateSoAHandleClass.
+   *  6. Create new handle instance.
+   *  7. Release JS objects (_items = null) and switch _mode = 'soa'.
+   *
+   * This is called:
+   *  - Automatically from push() when _len >= _graduateAt.
+   *  - From column() when _mode === 'js' (user wants TypedArray, implies SoA).
+   *  - From graduate() directly.
+   */
+  function graduateToSoA(): void {
+    // Step 1: compute initial SoA capacity — at least 2x current len, min 128.
+    const DEFAULT_CAPACITY = 128
+    const soaCapacity = Math.max(_len * 2, DEFAULT_CAPACITY)
+
+    // Step 2: allocate new buffer.
+    const newBuf = new ArrayBuffer(layout.sizeofPerSlot * soaCapacity)
+
+    // Step 3: build column TypedArrays over the new buffer.
+    // buildColumns populates _columnMap, columnRefs, and _columnArrays.
+    buildColumns(newBuf, soaCapacity)
+
+    // Step 4: copy data from JS objects into TypedArray columns.
+    // generateCopyToColumnsFn produces a codegen'd function that iterates
+    // once and copies each field to its column TypedArray.
+    const copyFn = generateCopyToColumnsFn(def.fields, columnRefs)
+    copyFn(_items, _len)
+
+    // Step 5+6: generate SoA handle class and create handle instance.
+    HandleClass = generateSoAHandleClass(layout.handleTree, columnRefs)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    _handle = new (HandleClass as any)(0) as Handle<F>
+
+    // Step 7: switch mode and release JS objects.
+    _buf = newBuf
+    _capacity = soaCapacity
+    _mode = 'soa'
+    _items = null as unknown as object[]
+  }
+
   // ---------------------------------------------------------------------------
   // Return the vec as a plain object literal with getters where needed.
   // Closures are created once here (vec() call time), never inside hot paths.
@@ -437,6 +516,17 @@ export function vec<F extends StructFields>(
         _jsHandle._rebase(obj)
         _jsHandle._slot = _len
         _len++
+        // Auto-graduation: when len reaches the threshold, switch to SoA mode.
+        // The item just pushed is included in _items before graduation runs, so
+        // all data (including this new item) is copied to SoA columns.
+        if (_len >= _graduateAt) {
+          graduateToSoA()
+          // After graduation, _handle is the SoA handle. Rebase it to the slot
+          // of the item we just pushed.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is code-generated
+          ;((_handle as any)._rebase(_len - 1))
+          return _handle
+        }
         return _jsHandle as Handle<F>
       }
     },
@@ -563,6 +653,8 @@ export function vec<F extends StructFields>(
     get buffer(): ArrayBuffer {
       assertLive()
       if (_mode === 'js') {
+        // buffer is not available in JS mode — but we keep this guard for
+        // vecs that are permanently in JS mode (mode: 'js' option, task-4).
         throw new Error('buffer not available in JS mode')
       }
       return _buf
@@ -571,7 +663,9 @@ export function vec<F extends StructFields>(
     column<K extends ColumnKey<F>>(name: K): ColumnType<F, K> {
       assertLive()
       if (_mode === 'js') {
-        throw new Error('column() not available in JS mode yet — will trigger graduation in task-3')
+        // Auto-graduate: caller clearly wants TypedArray (SoA) data.
+        // This is a one-time cost — subsequent column() calls are free.
+        graduateToSoA()
       }
       const arr = _columnMap.get(name)
       if (arr === undefined) {
@@ -671,6 +765,21 @@ export function vec<F extends StructFields>(
       HandleClass = generateSoAHandleClass(layout.handleTree, columnRefs)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       _handle = new (HandleClass as any)(0) as Handle<F>
+    },
+
+    get mode(): 'js' | 'soa' {
+      return _mode
+    },
+
+    get isGraduated(): boolean {
+      return _mode === 'soa'
+    },
+
+    graduate(): void {
+      assertLive()
+      if (_mode === 'js') {
+        graduateToSoA()
+      }
     },
   }
 }

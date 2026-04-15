@@ -63,9 +63,12 @@ describe('vec JS mode — mode selection', () => {
     expect(() => v.buffer).toThrow('buffer not available in JS mode')
   })
 
-  it('column() throws in JS mode', () => {
+  it('column() in JS mode triggers graduation (no longer throws)', () => {
     const v = vec(Point2D)
-    expect(() => v.column('x')).toThrow()
+    // column() in JS mode graduates the vec first, then returns the TypedArray
+    const col = v.column('x')
+    expect(col).toBeInstanceOf(Float64Array)
+    expect(v.isGraduated).toBe(true)
   })
 
   it('reserve is a no-op in JS mode (does not throw)', () => {

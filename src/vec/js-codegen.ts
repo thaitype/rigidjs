@@ -1,5 +1,6 @@
 import type { StructFields } from '../types.js'
 import { isNumericType } from '../struct/layout.js'
+import type { ColumnRef } from '../struct/handle-codegen.js'
 
 // ---------------------------------------------------------------------------
 // JS mode codegen (milestone-7 task-2)
@@ -205,4 +206,97 @@ function generateJSHandleLevel(
  */
 export function generateJSHandleClass(fields: StructFields): JSHandleConstructor {
   return generateJSHandleLevel(fields, '')
+}
+
+// ---------------------------------------------------------------------------
+// Copy-to-columns codegen (milestone-7 task-3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Recursively collects all leaf field paths for the copy-to-columns function.
+ * Returns an array of dotted paths like ['pos.x', 'pos.y', 'vel.x', 'life', 'id'].
+ */
+function collectLeafPaths(fields: StructFields, prefix: string): string[] {
+  const paths: string[] = []
+  for (const key of Object.keys(fields)) {
+    const fieldType = fields[key]!
+    const path = prefix.length === 0 ? key : `${prefix}.${key}`
+    if (isNumericType(fieldType)) {
+      paths.push(path)
+    } else {
+      paths.push(...collectLeafPaths(fieldType.fields, path))
+    }
+  }
+  return paths
+}
+
+/**
+ * Generate a codegen'd function that copies all data from a JS object array
+ * into TypedArray columns efficiently.
+ *
+ * Generated form (example for struct({ x: 'f64', y: 'f64', pos: { x: 'f64' } })):
+ * ```javascript
+ * function copyToColumns(items, len, col_x, col_y, col_pos_x) {
+ *   for (let i = 0; i < len; i++) {
+ *     const o = items[i];
+ *     col_x[i] = o.x;
+ *     col_y[i] = o.y;
+ *     col_pos_x[i] = o.pos.x;
+ *   }
+ * }
+ * ```
+ *
+ * Uses `new Function()` — generated once at graduation time (not per-call).
+ * The column TypedArrays are passed as arguments and captured in the loop body.
+ *
+ * @param fields     The struct fields (from StructDef.fields).
+ * @param columnRefs Map from dotted column name to ColumnRef containing the TypedArray.
+ * @returns          A function `(items: object[], len: number) => void` that copies data.
+ */
+export function generateCopyToColumnsFn(
+  fields: StructFields,
+  columnRefs: ReadonlyMap<string, ColumnRef>,
+): (items: object[], len: number) => void {
+  // Collect all leaf paths in declaration order (matching how they appear in the struct).
+  const leafPaths = collectLeafPaths(fields, '')
+
+  if (leafPaths.length === 0) {
+    return function noopCopy(_items: object[], _len: number): void {}
+  }
+
+  // Build parameter names: col_pos_x, col_vel_y, etc. (dots replaced by underscores)
+  const colParamNames = leafPaths.map(p => `col_${p.replace(/\./g, '_')}`)
+
+  // Factory params = one TypedArray per column. Factory returns the inner copy function.
+  const factoryParams = colParamNames.join(', ')
+
+  // Build inner loop body — one assignment per column
+  let loopBody = '    const o = items[i];\n'
+  for (let i = 0; i < leafPaths.length; i++) {
+    const path = leafPaths[i]!
+    const paramName = colParamNames[i]!
+    loopBody += `    ${paramName}[i] = o.${path};\n`
+  }
+
+  const fnBody = [
+    'return function copyToColumns(items, len) {',
+    '  for (let i = 0; i < len; i++) {',
+    loopBody,
+    '  }',
+    '}',
+  ].join('\n')
+
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval -- intentional codegen, same pattern as handle-codegen.ts
+  const factory = new Function(factoryParams, fnBody) as (...args: unknown[]) => (items: object[], len: number) => void
+
+  // Resolve each column's TypedArray from columnRefs in the same order as leafPaths
+  const columnArrays = leafPaths.map(path => {
+    const ref = columnRefs.get(path)
+    if (ref === undefined) {
+      throw new Error(`generateCopyToColumnsFn: no column ref found for '${path}'`)
+    }
+    return ref.array
+  })
+
+  return factory(...columnArrays)
 }
