@@ -2,14 +2,14 @@
  * Tests for vec JS mode — milestone-7 task-2.
  *
  * When vec(def) is called with no capacity, the vec starts in JS mode:
- * plain JS objects backed by a regular Array, with a JSHandle wrapping them.
+ * plain JS objects backed by a regular Array. Each object IS the handle.
  *
  * Covers:
  *   - vec without capacity starts in JS mode
  *   - vec with capacity starts in SoA mode (existing behavior preserved)
- *   - push: creates JS objects, returns JSHandle
+ *   - push: creates JS objects, returns plain JS object as handle
  *   - pop: removes last element
- *   - get: returns JSHandle for item at index
+ *   - get: returns plain JS object at index
  *   - get out of range throws
  *   - swapRemove: O(1) removal, last element moves to removed index
  *   - remove: order-preserving removal
@@ -17,7 +17,8 @@
  *   - drop: nulls out _items, all ops throw afterwards
  *   - forEach: visits all elements in order
  *   - for..of: visits all elements via iterator
- *   - handle reuse: same JSHandle instance returned every time
+ *   - push and get(0) return the same underlying object
+ *   - different indices return different objects
  *   - nested struct field access (h.pos.x, h.pos.y, etc.)
  *   - field read/write correctness
  *   - capacity === len in JS mode (JS arrays grow automatically)
@@ -83,11 +84,12 @@ describe('vec JS mode — mode selection', () => {
 // ---------------------------------------------------------------------------
 
 describe('vec JS mode — push / len / capacity', () => {
-  it('push returns a handle with a slot getter', () => {
+  it('push returns a handle with the struct fields defined', () => {
     const v = vec(Point2D)
     const h = v.push()
     expect(h).toBeDefined()
-    expect(typeof h.slot).toBe('number')
+    expect(typeof h.x).toBe('number')
+    expect(typeof h.y).toBe('number')
   })
 
   it('push increments len', () => {
@@ -110,14 +112,14 @@ describe('vec JS mode — push / len / capacity', () => {
     expect(v.capacity).toBe(2)
   })
 
-  it('push slot matches the index of the new element', () => {
+  it('push returns distinct objects for each element', () => {
     const v = vec(Point2D)
     const h0 = v.push()
-    expect(h0.slot).toBe(0)
     const h1 = v.push()
-    expect(h1.slot).toBe(1)
     const h2 = v.push()
-    expect(h2.slot).toBe(2)
+    // Each push creates a distinct plain JS object
+    expect(h0).not.toBe(h1)
+    expect(h1).not.toBe(h2)
   })
 
   it('handle fields are writable and readable after push', () => {
@@ -162,12 +164,15 @@ describe('vec JS mode — get', () => {
     expect(r1.y).toBe(4.0)
   })
 
-  it('handle.slot returns the correct index after get', () => {
+  it('get(i) returns the correct element (same object as pushed)', () => {
     const v = vec(Point2D)
+    const pushed = v.push()
+    pushed.x = 42
     v.push()
-    v.push()
-    const h = v.get(1)
-    expect(h.slot).toBe(1)
+    const got = v.get(0)
+    // get(0) returns the same underlying plain JS object as was returned from push
+    expect(got).toBe(pushed)
+    expect(got.x).toBe(42)
   })
 
   it('get throws "index out of range" when index >= len', () => {
@@ -183,20 +188,21 @@ describe('vec JS mode — get', () => {
     expect(() => v.get(-1)).toThrow('index out of range')
   })
 
-  it('handle reuse: push and get return the SAME handle instance', () => {
+  it('push and get(0) return the SAME underlying object', () => {
     const v = vec(Point2D)
     const h = v.push()
     const g = v.get(0)
     expect(h).toBe(g)
   })
 
-  it('multiple get calls return the same handle instance', () => {
+  it('get calls for different indices return different objects', () => {
     const v = vec(Point2D)
     v.push()
     v.push()
     const a = v.get(0)
     const b = v.get(1)
-    expect(a).toBe(b)
+    // Each element is an independent plain JS object
+    expect(a).not.toBe(b)
   })
 })
 
@@ -447,7 +453,7 @@ describe('vec JS mode — forEach', () => {
     expect(v.get(2).x).toBe(103)
   })
 
-  it('reuses the same handle instance at every step', () => {
+  it('each step receives a distinct plain JS object for its element', () => {
     const v = vec(Point2D)
     v.push()
     v.push()
@@ -457,8 +463,9 @@ describe('vec JS mode — forEach', () => {
     v.forEach((h) => { seen.push(h) })
 
     expect(seen.length).toBe(3)
-    expect(seen[0] === seen[1]).toBe(true)
-    expect(seen[1] === seen[2]).toBe(true)
+    // Each element is an independent plain JS object — different instances
+    expect(seen[0]).not.toBe(seen[1])
+    expect(seen[1]).not.toBe(seen[2])
   })
 
   it('empty vec: cb is never called', () => {
@@ -468,13 +475,15 @@ describe('vec JS mode — forEach', () => {
     expect(count).toBe(0)
   })
 
-  it('handle.slot equals the index argument at every step', () => {
+  it('index argument is correct at every step', () => {
     const v = vec(Point2D)
     for (let i = 0; i < 4; i++) v.push()
 
-    v.forEach((h, idx) => {
-      expect((h as any).slot).toBe(idx)
+    const indices: number[] = []
+    v.forEach((_h, idx) => {
+      indices.push(idx)
     })
+    expect(indices).toEqual([0, 1, 2, 3])
   })
 
   it('after drop() throws "vec has been dropped"', () => {
@@ -518,7 +527,7 @@ describe('vec JS mode — for..of iterator', () => {
     expect(count).toBe(0)
   })
 
-  it('for..of reuses the same handle instance each step', () => {
+  it('for..of yields distinct plain JS objects for each element', () => {
     const v = vec(Point2D)
     v.push()
     v.push()
@@ -528,19 +537,23 @@ describe('vec JS mode — for..of iterator', () => {
     for (const h of v) { handles.push(h) }
 
     expect(handles.length).toBe(3)
-    expect(handles[0] === handles[1]).toBe(true)
-    expect(handles[1] === handles[2]).toBe(true)
+    // Each element is an independent plain JS object — different instances
+    expect(handles[0]).not.toBe(handles[1])
+    expect(handles[1]).not.toBe(handles[2])
   })
 
-  it('for..of slot matches position', () => {
+  it('for..of visits elements in index order with correct field values', () => {
     const v = vec(Point2D)
-    for (let i = 0; i < 3; i++) v.push()
-
-    let idx = 0
-    for (const h of v) {
-      expect((h as any).slot).toBe(idx)
-      idx++
+    for (let i = 0; i < 3; i++) {
+      const h = v.push()
+      h.x = i * 10
     }
+
+    const xs: number[] = []
+    for (const h of v) {
+      xs.push(h.x)
+    }
+    expect(xs).toEqual([0, 10, 20])
   })
 })
 

@@ -2,7 +2,7 @@ import type { StructDef, StructFields, Handle, ColumnKey, ColumnType } from '../
 import { computeColumnLayout } from '../struct/layout.js'
 import { generateSoAHandleClass } from '../struct/handle-codegen.js'
 import type { ColumnRef } from '../struct/handle-codegen.js'
-import { generateJSObjectFactory, generateJSHandleClass, generateCopyToColumnsFn } from './js-codegen.js'
+import { generateJSObjectFactory, generateCopyToColumnsFn } from './js-codegen.js'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -368,20 +368,11 @@ export function vec<F extends StructFields>(
   // Only used when _mode === 'js'.
   let _items: object[] = jsMode ? [] : (null as unknown as object[])
 
-  // Reusable JS handle (rebased per operation, never allocated per-call).
+  // Factory function to create JS objects with stable hidden class.
   // Only used when _mode === 'js'.
-  //
-  // JSHandleClass and _createJSObject are cached on the StructDef (_JSHandle / _JSFactory)
-  // so that the new Function() codegen runs at most once per struct definition across
-  // all vec() calls with the same def. Subsequent vec() calls reuse the cached constructors.
+  // Cached on the StructDef (_JSFactory) so that new Function() codegen runs at most
+  // once per struct definition across all vec() calls with the same def.
   if (jsMode) {
-    // Lazy-initialize and cache on the StructDef (same pattern as _columnLayout).
-    // The cast to `any` is required because _JSHandle / _JSFactory are mutable internal fields.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
-    if (!(def as any)._JSHandle) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
-      ;(def as any)._JSHandle = generateJSHandleClass(def.fields)
-    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
     if (!(def as any)._JSFactory) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
@@ -389,13 +380,6 @@ export function vec<F extends StructFields>(
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSHandleConstructor returns `object`; any isolates the bridge
-  const JSHandleClass = jsMode ? (def as any)._JSHandle : (null as any)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let _jsHandle: any = jsMode ? new (JSHandleClass as any)({}) : null
-
-  // Factory function to create JS objects with stable hidden class.
-  // Only used when _mode === 'js'.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
   const _createJSObject: (() => object) | null = jsMode ? (def as any)._JSFactory : null
 
@@ -611,10 +595,9 @@ export function vec<F extends StructFields>(
         return _handle
       } else {
         // JS mode: create a plain JS object and push into _items.
+        // The plain JS object IS the handle — no wrapper needed.
         const obj = _createJSObject!()
         _items.push(obj)
-        _jsHandle._rebase(obj)
-        _jsHandle._slot = _len
         _len++
         // Auto-graduation: when len reaches the threshold, switch to SoA mode.
         // The item just pushed is included in _items before graduation runs, so
@@ -627,7 +610,7 @@ export function vec<F extends StructFields>(
           ;((_handle as any)._rebase(_len - 1))
           return _handle
         }
-        return _jsHandle as Handle<F>
+        return obj as unknown as Handle<F>
       }
     },
 
@@ -658,13 +641,11 @@ export function vec<F extends StructFields>(
         ;((_handle as any)._rebase(index))
         return _handle
       } else {
-        // JS mode
+        // JS mode: return the plain JS object directly
         if (index < 0 || index >= _len) {
           throw new Error('index out of range')
         }
-        _jsHandle._rebase(_items[index]!)
-        _jsHandle._slot = index
-        return _jsHandle as Handle<F>
+        return _items[index] as unknown as Handle<F>
       }
     },
 
@@ -794,16 +775,15 @@ export function vec<F extends StructFields>(
           },
         }
       } else {
-        // JS mode iterator
+        // JS mode iterator: yield plain JS objects directly
         let cursor = 0
         return {
           next(): IteratorResult<Handle<F>> {
             assertLive()
             if (cursor < _len) {
-              _jsHandle._rebase(_items[cursor]!)
-              _jsHandle._slot = cursor
+              const obj = _items[cursor]!
               cursor++
-              return { value: _jsHandle as Handle<F>, done: false }
+              return { value: obj as unknown as Handle<F>, done: false }
             }
             return { value: undefined as unknown as Handle<F>, done: true }
           },
@@ -822,11 +802,9 @@ export function vec<F extends StructFields>(
           cb(_handle, i)
         }
       } else {
-        // JS mode: loop _items, rebase JSHandle to each.
+        // JS mode: pass plain JS objects directly — no wrapper needed.
         for (let i = 0; i < _len; i++) {
-          _jsHandle._rebase(_items[i]!)
-          _jsHandle._slot = i
-          cb(_jsHandle as Handle<F>, i)
+          cb(_items[i] as unknown as Handle<F>, i)
         }
       }
     },

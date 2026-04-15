@@ -36,8 +36,6 @@ export interface StructDef<F extends StructFields> {
   readonly _offsets?: ReadonlyMap<string, { offset: number; type: FieldType }>
   /** @internal Column layout — implementation detail for SoA containers. */
   readonly _columnLayout?: import('./struct/layout.js').ColumnLayout
-  /** @internal Cached JS handle constructor for hybrid vec mode — lazy-initialized on first vec() call. */
-  _JSHandle?: new (obj: object) => object
   /** @internal Cached JS object factory for hybrid vec mode — lazy-initialized on first vec() call. */
   _JSFactory?: () => object
 }
