@@ -33,6 +33,10 @@ RigidJS exists to eliminate GC pressure. Any code that defeats this purpose is w
 - **Zero runtime dependencies.** `dependencies` in `package.json` stays empty. Dev-only tooling goes in `devDependencies`.
 - **Allowed imports:** JS built-ins, `bun:*` modules. Anything else requires chief-agent approval.
 
+## Throughput Goal
+
+RigidJS targets **>=1x JS-native throughput** for every operation, in addition to better GC characteristics. When a RigidJS operation is slower than its plain-JS equivalent, that is a performance bug or an R&D challenge -- not an accepted trade-off. See `_goal/performance-vision.md` for the full vision and R&D directions.
+
 ## Measuring
 
 - Benchmarks use `Bun.nanoseconds()` and `bun:jsc` `heapStats()` (see spec §7.2).
