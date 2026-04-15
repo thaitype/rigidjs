@@ -253,6 +253,595 @@ export interface VecOptions {
 }
 
 // ---------------------------------------------------------------------------
+// Internal TypedArray union type
+// ---------------------------------------------------------------------------
+
+type AnyTypedArray =
+  | Float64Array | Float32Array | Uint32Array | Uint16Array | Uint8Array
+  | Int32Array | Int16Array | Int8Array
+
+// ---------------------------------------------------------------------------
+// VecImpl class
+// Prototype-defined methods and getters eliminate per-call defineProperty()
+// overhead that the old object-literal approach incurred (~230 ns/call).
+// ---------------------------------------------------------------------------
+
+class VecImpl<F extends StructFields> implements Vec<F> {
+  // Shared state
+  private _len = 0
+  private _dropped = false
+  private _mode: 'soa' | 'js'
+  private _graduateAt: number
+
+  // JS mode state
+  private _items: object[] | null
+  private _createJSObject: (() => object) | null
+
+  // SoA mode state
+  private _buf: ArrayBuffer | null
+  private _capacity: number
+  private _columnMap: Map<string, AnyTypedArray>
+  private _columnRefs: Map<string, ColumnRef>
+  private _columnArrays: AnyTypedArray[]
+  private _swapFn: (index: number, lastIndex: number) => void
+  private _HandleClass: ReturnType<typeof generateSoAHandleClass> | null
+  private _handle: Handle<F> | null
+
+  // Layout is shared across instances via def._columnLayout
+  private readonly _layout: ReturnType<typeof computeColumnLayout>
+  private readonly _def: StructDef<F>
+
+  constructor(def: StructDef<F>, opts?: number | VecOptions) {
+    // ---------------------------------------------------------------------------
+    // Parse options
+    // ---------------------------------------------------------------------------
+    let resolvedMode: 'js' | 'soa' | 'hybrid' = 'hybrid'
+    let initialCapacity: number | undefined
+    let graduateAt = 128
+
+    if (typeof opts === 'number') {
+      // Backward compat: vec(T, 16) → SoA mode, capacity=16
+      resolvedMode = 'soa'
+      initialCapacity = opts
+    } else if (opts !== undefined) {
+      // Validate contradictory options before anything else
+      if (opts.mode === 'js' && opts.capacity !== undefined) {
+        throw new Error('vec: cannot combine mode "js" with capacity (capacity implies SoA mode)')
+      }
+
+      if (opts.mode === 'soa' || opts.capacity !== undefined) {
+        resolvedMode = 'soa'
+        initialCapacity = opts.capacity
+      } else if (opts.mode === 'js') {
+        resolvedMode = 'js'  // permanent JS mode — never graduate
+      }
+      // else: resolvedMode stays 'hybrid'
+
+      if (opts.graduateAt !== undefined) {
+        if (!Number.isInteger(opts.graduateAt) || opts.graduateAt <= 0) {
+          throw new Error('vec: graduateAt must be a positive integer')
+        }
+        graduateAt = opts.graduateAt
+      }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Determine internal jsMode flag and _graduateAt
+    // ---------------------------------------------------------------------------
+    // jsMode=true  → start with JS objects (hybrid or permanent-js)
+    // jsMode=false → start with SoA TypedArray columns immediately
+    const jsMode = resolvedMode !== 'soa'
+    // _graduateAt: threshold for auto-graduation in hybrid mode.
+    // Infinity disables auto-graduation (permanent JS mode).
+    this._graduateAt = resolvedMode === 'js' ? Infinity : graduateAt
+
+    if (!jsMode) {
+      // --- Validation for SoA mode ---
+      if (initialCapacity !== undefined && (!Number.isInteger(initialCapacity) || initialCapacity <= 0)) {
+        throw new Error('vec: capacity must be a positive integer')
+      }
+    }
+
+    // --- Compute column layout (needed for SoA mode) ---
+    // Use the pre-computed layout from def._columnLayout if available;
+    // otherwise fall back to computing it (supports calling vec() with a raw StructDef).
+    this._layout = def._columnLayout ?? computeColumnLayout(def.fields)
+    this._def = def
+
+    // ---------------------------------------------------------------------------
+    // Initialize mode
+    // ---------------------------------------------------------------------------
+    this._mode = jsMode ? 'js' : 'soa'
+
+    // ---------------------------------------------------------------------------
+    // Initialize JS mode state
+    // ---------------------------------------------------------------------------
+    if (jsMode) {
+      this._items = []
+      // Cache factory on StructDef so codegen runs at most once per struct definition.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
+      if (!(def as any)._JSFactory) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
+        ;(def as any)._JSFactory = generateJSObjectFactory(def.fields)
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
+      this._createJSObject = (def as any)._JSFactory as () => object
+    } else {
+      this._items = null
+      this._createJSObject = null
+    }
+
+    // ---------------------------------------------------------------------------
+    // Initialize SoA mode state
+    // ---------------------------------------------------------------------------
+
+    // Default SoA capacity when mode: 'soa' is forced without an explicit capacity.
+    const SOA_DEFAULT_CAPACITY = 16
+    const soaInitialCapacity = jsMode ? 0 : (initialCapacity ?? SOA_DEFAULT_CAPACITY)
+
+    this._columnMap = new Map()
+    this._columnRefs = new Map()
+    this._columnArrays = []
+    this._swapFn = () => {}
+    this._HandleClass = null
+    this._handle = null
+
+    if (!jsMode) {
+      this._buf = new ArrayBuffer(this._layout.sizeofPerSlot * soaInitialCapacity)
+      this._capacity = soaInitialCapacity
+      this._buildColumns(this._buf, this._capacity)
+      this._HandleClass = generateSoAHandleClass(this._layout.handleTree, this._columnRefs)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      this._handle = new (this._HandleClass as any)(0) as Handle<F>
+    } else {
+      this._buf = null
+      this._capacity = 0
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
+  private _assertLive(): void {
+    if (this._dropped) throw new Error('vec has been dropped')
+  }
+
+  /**
+   * Generate an unrolled swapRemove inner function for the given column arrays.
+   *
+   * Uses new Function() (same technique as handle codegen) to produce a closure
+   * that captures each TypedArray directly by variable name, avoiding the
+   * outer array deref (_columnArrays[c]) on every call.
+   *
+   * Each call to _buildColumns() produces a new closure capturing the new TypedArrays.
+   * One allocation per construction/growth event — never inside swapRemove itself.
+   */
+  private static _generateSwapFn(arrays: AnyTypedArray[]): (index: number, lastIndex: number) => void {
+    if (arrays.length === 0) {
+      // Zero-column struct: swap is a no-op.
+      return function noopSwap(_index: number, _lastIndex: number): void {}
+    }
+    // Build parameter list: c0, c1, c2, ...
+    const params = arrays.map((_, i) => `c${i}`).join(', ')
+    // Build unrolled body: one line per column.
+    let body = ''
+    for (let i = 0; i < arrays.length; i++) {
+      body += `  c${i}[index] = c${i}[lastIndex];\n`
+    }
+    // eslint-disable-next-line no-new-func -- intentional codegen; same pattern as handle-codegen.ts
+    const factory = new Function(params, `return function unrolledSwap(index, lastIndex) {\n${body}}`)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- factory is runtime-generated
+    return (factory as any)(...arrays) as (index: number, lastIndex: number) => void
+  }
+
+  private _buildColumns(buf: ArrayBuffer, cap: number): void {
+    this._columnMap = new Map()
+    this._columnRefs = new Map()
+    this._columnArrays = []
+    for (const col of this._layout.columns) {
+      const bufByteOffset = col.byteOffset * cap
+
+      // Alignment assertion — same rationale as slab.
+      if (bufByteOffset % col.elementSize !== 0) {
+        throw new Error(
+          `vec: alignment violation for column '${col.name}': ` +
+          `bufByteOffset=${bufByteOffset} is not a multiple of elementSize=${col.elementSize}.`,
+        )
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TypedArray ctor is a union; any is required to call new
+      const array = new (col.typedArrayCtor as any)(buf, bufByteOffset, cap) as AnyTypedArray
+
+      this._columnMap.set(col.name, array)
+      this._columnRefs.set(col.name, { name: col.name, array })
+      this._columnArrays.push(array)
+    }
+    // Regenerate the unrolled swap function to capture the new TypedArray instances.
+    // One new Function() call per construction/growth event — not per swapRemove call.
+    this._swapFn = VecImpl._generateSwapFn(this._columnArrays)
+  }
+
+  /**
+   * Grow the SoA backing buffer to 2x capacity.
+   *
+   * Steps:
+   *  1. Compute newCapacity = _capacity * 2.
+   *  2. Allocate new ArrayBuffer.
+   *  3. Build new column TypedArrays over the new buffer.
+   *  4. Copy existing data from old columns to new columns via TypedArray.set().
+   *  5. Update _buf and _capacity.
+   *  6. Re-create the handle via Strategy A: call generateSoAHandleClass() again
+   *     with the new column refs to produce a new handle whose closure captures
+   *     the new TypedArrays. Rebases the new handle to current _len before push.
+   *
+   * Strategy A is chosen because mutating column TypedArray fields on an existing
+   * handle object (Strategy B / _rebindColumns) causes JSC JIT deoptimization:
+   * the JIT profiles field types as stable and deoptimizes when they change.
+   * Re-creating the handle once per growth event keeps each handle instance
+   * monomorphic throughout its lifetime, enabling full JIT specialization.
+   */
+  private _grow(): void {
+    const newCapacity = this._capacity * 2
+    const newBuf = new ArrayBuffer(this._layout.sizeofPerSlot * newCapacity)
+
+    // Snapshot old columns before rebuilding.
+    const oldColumnArrays = this._columnArrays.slice()
+
+    // Build new columns over the new buffer.
+    this._buildColumns(newBuf, newCapacity)
+
+    // Copy all existing data from old columns to new columns.
+    // TypedArray.set(source) copies the entire source array into the target
+    // starting at offset 0 — one native call per column.
+    for (let c = 0; c < this._columnArrays.length; c++) {
+      this._columnArrays[c]!.set(oldColumnArrays[c]!)
+    }
+
+    // Update internal state.
+    this._buf = newBuf
+    this._capacity = newCapacity
+
+    // Re-create handle with new column refs (Strategy A).
+    // The old _HandleClass and old _handle become unreferenced and GC-collectable.
+    this._HandleClass = generateSoAHandleClass(this._layout.handleTree, this._columnRefs)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this._handle = new (this._HandleClass as any)(0) as Handle<F>
+  }
+
+  /**
+   * Transition from JS mode to SoA mode (graduation).
+   *
+   * Steps:
+   *  1. Compute initial SoA capacity: max(_len * 2, DEFAULT_CAPACITY) — give room to grow.
+   *  2. Allocate ArrayBuffer(layout.sizeofPerSlot * soaCapacity).
+   *  3. _buildColumns(newBuf, soaCapacity) — builds TypedArray views and columnRefs.
+   *  4. Copy data from _items JS objects into columns via codegen'd copyToColumns function.
+   *  5. Generate SoA handle class via generateSoAHandleClass.
+   *  6. Create new handle instance.
+   *  7. Release JS objects (_items = null) and switch _mode = 'soa'.
+   *
+   * This is called:
+   *  - Automatically from push() when _len >= _graduateAt.
+   *  - From column() when _mode === 'js' (user wants TypedArray, implies SoA).
+   *  - From graduate() directly.
+   */
+  private _graduateToSoA(): void {
+    // Step 1: compute initial SoA capacity — at least 2x current len, min 128.
+    const DEFAULT_CAPACITY = 128
+    const soaCapacity = Math.max(this._len * 2, DEFAULT_CAPACITY)
+
+    // Step 2: allocate new buffer.
+    const newBuf = new ArrayBuffer(this._layout.sizeofPerSlot * soaCapacity)
+
+    // Step 3: build column TypedArrays over the new buffer.
+    // _buildColumns populates _columnMap, _columnRefs, and _columnArrays.
+    this._buildColumns(newBuf, soaCapacity)
+
+    // Step 4: copy data from JS objects into TypedArray columns.
+    // generateCopyToColumnsFn produces a codegen'd function that iterates
+    // once and copies each field to its column TypedArray.
+    const copyFn = generateCopyToColumnsFn(this._def.fields, this._columnRefs)
+    copyFn(this._items!, this._len)
+
+    // Step 5+6: generate SoA handle class and create handle instance.
+    this._HandleClass = generateSoAHandleClass(this._layout.handleTree, this._columnRefs)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this._handle = new (this._HandleClass as any)(0) as Handle<F>
+
+    // Step 7: switch mode and release JS objects.
+    this._buf = newBuf
+    this._capacity = soaCapacity
+    this._mode = 'soa'
+    this._items = null
+  }
+
+  // ---------------------------------------------------------------------------
+  // Public methods (on prototype — no per-instance defineProperty() cost)
+  // ---------------------------------------------------------------------------
+
+  push(): Handle<F> {
+    this._assertLive()
+    if (this._mode === 'soa') {
+      if (this._len >= this._capacity) {
+        this._grow()
+      }
+      const slot = this._len
+      this._len++
+      // SoA _rebase takes only (slot) — no DataView, no byte offset.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated and not in static TS type
+      ;((this._handle as any)._rebase(slot))
+      return this._handle!
+    } else {
+      // JS mode: create a plain JS object and push into _items.
+      // The plain JS object IS the handle — no wrapper needed.
+      const obj = this._createJSObject!()
+      this._items!.push(obj)
+      this._len++
+      // Auto-graduation: when len reaches the threshold, switch to SoA mode.
+      // The item just pushed is included in _items before graduation runs, so
+      // all data (including this new item) is copied to SoA columns.
+      if (this._len >= this._graduateAt) {
+        this._graduateToSoA()
+        // After graduation, _handle is the SoA handle. Rebase it to the slot
+        // of the item we just pushed.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is code-generated
+        ;((this._handle as any)._rebase(this._len - 1))
+        return this._handle!
+      }
+      return obj as unknown as Handle<F>
+    }
+  }
+
+  pop(): void {
+    this._assertLive()
+    if (this._mode === 'soa') {
+      if (this._len === 0) {
+        throw new Error('vec is empty')
+      }
+      this._len--
+    } else {
+      // JS mode
+      if (this._len === 0) {
+        throw new Error('vec is empty')
+      }
+      this._items!.pop()
+      this._len--
+    }
+  }
+
+  get(index: number): Handle<F> {
+    this._assertLive()
+    if (this._mode === 'soa') {
+      if (index < 0 || index >= this._len) {
+        throw new Error('index out of range')
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- same bridge as push()
+      ;((this._handle as any)._rebase(index))
+      return this._handle!
+    } else {
+      // JS mode: return the plain JS object directly
+      if (index < 0 || index >= this._len) {
+        throw new Error('index out of range')
+      }
+      return this._items![index] as unknown as Handle<F>
+    }
+  }
+
+  swapRemove(index: number): void {
+    this._assertLive()
+    if (this._mode === 'soa') {
+      if (index < 0 || index >= this._len) {
+        throw new Error('index out of range')
+      }
+      // Copy all column values from last element into index.
+      // When index === _len - 1, this is a self-assignment (harmless).
+      // _swapFn is a codegen-unrolled function (generated via new Function() at
+      // construction/growth time) that writes each column directly without a loop.
+      this._swapFn(index, this._len - 1)
+      this._len--
+    } else {
+      // JS mode
+      if (index < 0 || index >= this._len) {
+        throw new Error('index out of range')
+      }
+      const last = this._len - 1
+      // Move the last item to the removed slot.
+      // When index === last, this is a self-assignment (harmless).
+      this._items![index] = this._items![last]!
+      this._items!.pop()
+      this._len--
+    }
+  }
+
+  remove(index: number): void {
+    this._assertLive()
+    if (this._mode === 'soa') {
+      if (index < 0 || index >= this._len) {
+        throw new Error('index out of range')
+      }
+      // Shift all elements after index left by one position.
+      // TypedArray.copyWithin handles overlapping ranges correctly.
+      // Use pre-extracted _columnArrays to avoid Map.get() per column per call.
+      for (let c = 0; c < this._columnArrays.length; c++) {
+        this._columnArrays[c]!.copyWithin(index, index + 1, this._len)
+      }
+      this._len--
+    } else {
+      // JS mode
+      if (index < 0 || index >= this._len) {
+        throw new Error('index out of range')
+      }
+      this._items!.splice(index, 1)
+      this._len--
+    }
+  }
+
+  get len(): number {
+    return this._len
+  }
+
+  get capacity(): number {
+    if (this._mode === 'js') {
+      // JS arrays grow automatically; capacity === len in JS mode.
+      return this._len
+    }
+    return this._capacity
+  }
+
+  clear(): void {
+    this._assertLive()
+    if (this._mode === 'js') {
+      this._items!.length = 0
+    }
+    this._len = 0
+  }
+
+  drop(): void {
+    this._assertLive()
+    this._dropped = true
+    if (this._mode === 'js') {
+      // Null out _items so GC can reclaim the objects.
+      this._items = null
+    } else {
+      // Null out internal references so GC can reclaim them.
+      this._buf = null
+    }
+  }
+
+  get buffer(): ArrayBuffer {
+    this._assertLive()
+    if (this._mode === 'js') {
+      // buffer is not available in JS mode — but we keep this guard for
+      // vecs that are permanently in JS mode (mode: 'js' option, task-4).
+      throw new Error('buffer not available in JS mode')
+    }
+    return this._buf!
+  }
+
+  column<K extends ColumnKey<F>>(name: K): ColumnType<F, K> {
+    this._assertLive()
+    if (this._mode === 'js') {
+      // Auto-graduate: caller clearly wants TypedArray (SoA) data.
+      // This is a one-time cost — subsequent column() calls are free.
+      this._graduateToSoA()
+    }
+    const arr = this._columnMap.get(name)
+    if (arr === undefined) {
+      throw new Error(`unknown column: ${name}`)
+    }
+    // The runtime TypedArray subclass for this column was determined by the column's
+    // numeric token at vec construction time and is guaranteed to match ColumnType<F, K>.
+    return arr as unknown as ColumnType<F, K>
+  }
+
+  [Symbol.iterator](): Iterator<Handle<F>> {
+    if (this._mode === 'soa') {
+      // One iterator object allocated per for..of call.
+      // Each next() call rebases the shared handle — zero allocation per step.
+      let cursor = 0
+      const self = this
+      return {
+        next(): IteratorResult<Handle<F>> {
+          self._assertLive()
+          if (cursor < self._len) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is code-generated
+            ;((self._handle as any)._rebase(cursor))
+            cursor++
+            return { value: self._handle!, done: false }
+          }
+          return { value: undefined as unknown as Handle<F>, done: true }
+        },
+      }
+    } else {
+      // JS mode iterator: yield plain JS objects directly
+      let cursor = 0
+      const self = this
+      return {
+        next(): IteratorResult<Handle<F>> {
+          self._assertLive()
+          if (cursor < self._len) {
+            const obj = self._items![cursor]!
+            cursor++
+            return { value: obj as unknown as Handle<F>, done: false }
+          }
+          return { value: undefined as unknown as Handle<F>, done: true }
+        },
+      }
+    }
+  }
+
+  forEach(cb: (handle: Handle<F>, index: number) => void): void {
+    this._assertLive()
+    if (this._mode === 'soa') {
+      // Internal counted loop — no iterator protocol, no per-call allocation.
+      // Reuses the single shared handle instance by rebasing it to each index.
+      for (let i = 0; i < this._len; i++) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated and not in static TS type
+        ;((this._handle as any)._rebase(i))
+        cb(this._handle!, i)
+      }
+    } else {
+      // JS mode: pass plain JS objects directly — no wrapper needed.
+      for (let i = 0; i < this._len; i++) {
+        cb(this._items![i] as unknown as Handle<F>, i)
+      }
+    }
+  }
+
+  reserve(n: number): void {
+    this._assertLive()
+    if (!Number.isInteger(n) || n <= 0) {
+      throw new Error('vec.reserve: n must be a positive integer')
+    }
+    if (this._mode === 'js') {
+      // JS arrays grow automatically — reserve is a no-op in JS mode.
+      return
+    }
+    // No-op if already large enough.
+    if (this._capacity >= n) return
+
+    // Grow to exactly n.
+    const newBuf = new ArrayBuffer(this._layout.sizeofPerSlot * n)
+
+    // Snapshot old columns before rebuilding.
+    const oldColumnArrays = this._columnArrays.slice()
+
+    // Build new columns over the new buffer.
+    this._buildColumns(newBuf, n)
+
+    // Copy existing data from old columns to new columns.
+    for (let c = 0; c < this._columnArrays.length; c++) {
+      this._columnArrays[c]!.set(oldColumnArrays[c]!)
+    }
+
+    // Update internal state.
+    this._buf = newBuf
+    this._capacity = n
+
+    // Re-create handle with new column refs (Strategy A) — same as _grow().
+    this._HandleClass = generateSoAHandleClass(this._layout.handleTree, this._columnRefs)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this._handle = new (this._HandleClass as any)(0) as Handle<F>
+  }
+
+  get mode(): 'js' | 'soa' {
+    return this._mode
+  }
+
+  get isGraduated(): boolean {
+    return this._mode === 'soa'
+  }
+
+  graduate(): void {
+    this._assertLive()
+    if (this._mode === 'js') {
+      this._graduateToSoA()
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
@@ -289,575 +878,5 @@ export function vec<F extends StructFields>(
   def: StructDef<F>,
   opts?: number | VecOptions,
 ): Vec<F> {
-  // ---------------------------------------------------------------------------
-  // Parse options
-  // ---------------------------------------------------------------------------
-  let resolvedMode: 'js' | 'soa' | 'hybrid' = 'hybrid'
-  let initialCapacity: number | undefined
-  let graduateAt = 128
-
-  if (typeof opts === 'number') {
-    // Backward compat: vec(T, 16) → SoA mode, capacity=16
-    resolvedMode = 'soa'
-    initialCapacity = opts
-  } else if (opts !== undefined) {
-    // Validate contradictory options before anything else
-    if (opts.mode === 'js' && opts.capacity !== undefined) {
-      throw new Error('vec: cannot combine mode "js" with capacity (capacity implies SoA mode)')
-    }
-
-    if (opts.mode === 'soa' || opts.capacity !== undefined) {
-      resolvedMode = 'soa'
-      initialCapacity = opts.capacity
-    } else if (opts.mode === 'js') {
-      resolvedMode = 'js'  // permanent JS mode — never graduate
-    }
-    // else: resolvedMode stays 'hybrid'
-
-    if (opts.graduateAt !== undefined) {
-      if (!Number.isInteger(opts.graduateAt) || opts.graduateAt <= 0) {
-        throw new Error('vec: graduateAt must be a positive integer')
-      }
-      graduateAt = opts.graduateAt
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Determine internal jsMode flag and _graduateAt
-  // ---------------------------------------------------------------------------
-  // jsMode=true  → start with JS objects (hybrid or permanent-js)
-  // jsMode=false → start with SoA TypedArray columns immediately
-  const jsMode = resolvedMode !== 'soa'
-  // _graduateAt: threshold for auto-graduation in hybrid mode.
-  // Infinity disables auto-graduation (permanent JS mode).
-  const _graduateAt = resolvedMode === 'js' ? Infinity : graduateAt
-
-  if (!jsMode) {
-    // --- Validation for SoA mode ---
-    if (initialCapacity !== undefined && (!Number.isInteger(initialCapacity) || initialCapacity <= 0)) {
-      throw new Error('vec: capacity must be a positive integer')
-    }
-  }
-
-  // --- Compute column layout (needed for SoA mode) ---
-  // Use the pre-computed layout from def._columnLayout if available;
-  // otherwise fall back to computing it (supports calling vec() with a raw StructDef).
-  const layout = def._columnLayout ?? computeColumnLayout(def.fields)
-
-  // ---------------------------------------------------------------------------
-  // Shared state
-  // ---------------------------------------------------------------------------
-
-  let _len = 0
-  let _dropped = false
-  // Mode starts as 'js' when no initialCapacity is given.
-  // Transitions to 'soa' on graduation (auto at threshold, or explicit .graduate()/.column()).
-  // Once 'soa', never reverts to 'js'.
-  let _mode: 'soa' | 'js' = jsMode ? 'js' : 'soa'
-
-  // Helper created once at vec() call time — single closure allocation, not per-call.
-  function assertLive(): void {
-    if (_dropped) throw new Error('vec has been dropped')
-  }
-
-  // ---------------------------------------------------------------------------
-  // JS mode state
-  // ---------------------------------------------------------------------------
-
-  // _items: plain JS objects backing store for JS mode.
-  // Only used when _mode === 'js'.
-  let _items: object[] = jsMode ? [] : (null as unknown as object[])
-
-  // Factory function to create JS objects with stable hidden class.
-  // Only used when _mode === 'js'.
-  // Cached on the StructDef (_JSFactory) so that new Function() codegen runs at most
-  // once per struct definition across all vec() calls with the same def.
-  if (jsMode) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
-    if (!(def as any)._JSFactory) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
-      ;(def as any)._JSFactory = generateJSObjectFactory(def.fields)
-    }
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
-  const _createJSObject: (() => object) | null = jsMode ? (def as any)._JSFactory : null
-
-  // ---------------------------------------------------------------------------
-  // SoA mode state
-  // ---------------------------------------------------------------------------
-
-  // --- Build one TypedArray sub-view per column ---
-  //
-  // SoA buffer layout (capacity = N, columns sorted largest-first):
-  //   [col0: byteOffset=0, length=N] [col1: byteOffset=8, length=N] ...
-  //
-  // The byte start of column i in the buffer is: column[i].byteOffset * capacity.
-  // This is the same formula used by slab.
-  type AnyTypedArray =
-    | Float64Array | Float32Array | Uint32Array | Uint16Array | Uint8Array
-    | Int32Array | Int16Array | Int8Array
-
-  // Default SoA capacity when mode: 'soa' is forced without an explicit capacity.
-  const SOA_DEFAULT_CAPACITY = 16
-  const soaInitialCapacity = jsMode ? 0 : (initialCapacity ?? SOA_DEFAULT_CAPACITY)
-
-  // SoA-only state — initialized to null in JS mode to avoid unnecessary allocation.
-  let _buf: ArrayBuffer = jsMode ? (null as unknown as ArrayBuffer) : new ArrayBuffer(layout.sizeofPerSlot * soaInitialCapacity)
-  let _capacity: number = jsMode ? 0 : soaInitialCapacity
-  let _columnMap = new Map<string, AnyTypedArray>()
-  let columnRefs = new Map<string, ColumnRef>()
-  // Pre-extracted column arrays for allocation-free hot-path access in swapRemove/remove.
-  // Kept in sync with _columnMap on every buildColumns() call.
-  let _columnArrays: AnyTypedArray[] = []
-
-  // Codegen-unrolled swap function for swapRemove hot path.
-  // Generated via new Function() at construction time and on every growth/reserve event.
-  // eslint-disable-next-line prefer-const -- reassigned in buildColumns
-  let _swapFn: (index: number, lastIndex: number) => void = () => {}
-
-  /**
-   * Generate an unrolled swapRemove inner function for the given column arrays.
-   *
-   * Uses new Function() (same technique as handle codegen) to produce a closure
-   * that captures each TypedArray directly by variable name, avoiding the
-   * outer array deref (_columnArrays[c]) on every call.
-   *
-   * Each call to buildColumns() produces a new closure capturing the new TypedArrays.
-   * One allocation per construction/growth event — never inside swapRemove itself.
-   */
-  function generateSwapFn(arrays: AnyTypedArray[]): (index: number, lastIndex: number) => void {
-    if (arrays.length === 0) {
-      // Zero-column struct: swap is a no-op.
-      return function noopSwap(_index: number, _lastIndex: number): void {}
-    }
-    // Build parameter list: c0, c1, c2, ...
-    const params = arrays.map((_, i) => `c${i}`).join(', ')
-    // Build unrolled body: one line per column.
-    let body = ''
-    for (let i = 0; i < arrays.length; i++) {
-      body += `  c${i}[index] = c${i}[lastIndex];\n`
-    }
-    // eslint-disable-next-line no-new-func -- intentional codegen; same pattern as handle-codegen.ts
-    const factory = new Function(params, `return function unrolledSwap(index, lastIndex) {\n${body}}`)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- factory is runtime-generated
-    return (factory as any)(...arrays) as (index: number, lastIndex: number) => void
-  }
-
-  function buildColumns(buf: ArrayBuffer, cap: number): void {
-    _columnMap = new Map()
-    columnRefs = new Map()
-    _columnArrays = []
-    for (const col of layout.columns) {
-      const bufByteOffset = col.byteOffset * cap
-
-      // Alignment assertion — same rationale as slab.
-      if (bufByteOffset % col.elementSize !== 0) {
-        throw new Error(
-          `vec: alignment violation for column '${col.name}': ` +
-          `bufByteOffset=${bufByteOffset} is not a multiple of elementSize=${col.elementSize}.`,
-        )
-      }
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TypedArray ctor is a union; any is required to call new
-      const array = new (col.typedArrayCtor as any)(buf, bufByteOffset, cap) as AnyTypedArray
-
-      _columnMap.set(col.name, array)
-      columnRefs.set(col.name, { name: col.name, array })
-      _columnArrays.push(array)
-    }
-    // Regenerate the unrolled swap function to capture the new TypedArray instances.
-    // One new Function() call per construction/growth event — not per swapRemove call.
-    _swapFn = generateSwapFn(_columnArrays)
-  }
-
-  // --- Build the reusable SoA handle ---
-  // generateSoAHandleClass builds a class whose field getters/setters do pure TypedArray
-  // indexed access: `this._c_pos_x[this._slot]`. Column TypedArrays are captured in the
-  // class closure at construction time.
-  let HandleClass = jsMode ? (null as unknown as ReturnType<typeof generateSoAHandleClass>) : (
-    // Only build columns and handle in SoA mode.
-    (buildColumns(_buf, _capacity), generateSoAHandleClass(layout.handleTree, columnRefs))
-  )
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SoAHandleConstructor returns `object`; any isolates the bridge
-  let _handle: Handle<F> = jsMode ? (null as unknown as Handle<F>) : new (HandleClass as any)(0) as Handle<F>
-
-  /**
-   * Grow the SoA backing buffer to 2x capacity.
-   *
-   * Steps:
-   *  1. Compute newCapacity = _capacity * 2.
-   *  2. Allocate new ArrayBuffer.
-   *  3. Build new column TypedArrays over the new buffer.
-   *  4. Copy existing data from old columns to new columns via TypedArray.set().
-   *  5. Update _buf and _capacity.
-   *  6. Re-create the handle via Strategy A: call generateSoAHandleClass() again
-   *     with the new column refs to produce a new handle whose closure captures
-   *     the new TypedArrays. Rebases the new handle to current _len before push.
-   *
-   * Strategy A is chosen because mutating column TypedArray fields on an existing
-   * handle object (Strategy B / _rebindColumns) causes JSC JIT deoptimization:
-   * the JIT profiles field types as stable and deoptimizes when they change.
-   * Re-creating the handle once per growth event keeps each handle instance
-   * monomorphic throughout its lifetime, enabling full JIT specialization.
-   */
-  function grow(): void {
-    const newCapacity = _capacity * 2
-    const newBuf = new ArrayBuffer(layout.sizeofPerSlot * newCapacity)
-
-    // Snapshot old columns before rebuilding.
-    const oldColumnArrays = _columnArrays.slice()
-
-    // Build new columns over the new buffer.
-    buildColumns(newBuf, newCapacity)
-
-    // Copy all existing data from old columns to new columns.
-    // TypedArray.set(source) copies the entire source array into the target
-    // starting at offset 0 — one native call per column.
-    for (let c = 0; c < _columnArrays.length; c++) {
-      _columnArrays[c]!.set(oldColumnArrays[c]!)
-    }
-
-    // Update internal state.
-    _buf = newBuf
-    _capacity = newCapacity
-
-    // Re-create handle with new column refs (Strategy A).
-    // The old HandleClass and old _handle become unreferenced and GC-collectable.
-    HandleClass = generateSoAHandleClass(layout.handleTree, columnRefs)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    _handle = new (HandleClass as any)(0) as Handle<F>
-  }
-
-  /**
-   * Transition from JS mode to SoA mode (graduation).
-   *
-   * Steps:
-   *  1. Compute initial SoA capacity: max(_len * 2, DEFAULT_CAPACITY) — give room to grow.
-   *  2. Allocate ArrayBuffer(layout.sizeofPerSlot * soaCapacity).
-   *  3. buildColumns(newBuf, soaCapacity) — builds TypedArray views and columnRefs.
-   *  4. Copy data from _items JS objects into columns via codegen'd copyToColumns function.
-   *  5. Generate SoA handle class via generateSoAHandleClass.
-   *  6. Create new handle instance.
-   *  7. Release JS objects (_items = null) and switch _mode = 'soa'.
-   *
-   * This is called:
-   *  - Automatically from push() when _len >= _graduateAt.
-   *  - From column() when _mode === 'js' (user wants TypedArray, implies SoA).
-   *  - From graduate() directly.
-   */
-  function graduateToSoA(): void {
-    // Step 1: compute initial SoA capacity — at least 2x current len, min 128.
-    const DEFAULT_CAPACITY = 128
-    const soaCapacity = Math.max(_len * 2, DEFAULT_CAPACITY)
-
-    // Step 2: allocate new buffer.
-    const newBuf = new ArrayBuffer(layout.sizeofPerSlot * soaCapacity)
-
-    // Step 3: build column TypedArrays over the new buffer.
-    // buildColumns populates _columnMap, columnRefs, and _columnArrays.
-    buildColumns(newBuf, soaCapacity)
-
-    // Step 4: copy data from JS objects into TypedArray columns.
-    // generateCopyToColumnsFn produces a codegen'd function that iterates
-    // once and copies each field to its column TypedArray.
-    const copyFn = generateCopyToColumnsFn(def.fields, columnRefs)
-    copyFn(_items, _len)
-
-    // Step 5+6: generate SoA handle class and create handle instance.
-    HandleClass = generateSoAHandleClass(layout.handleTree, columnRefs)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    _handle = new (HandleClass as any)(0) as Handle<F>
-
-    // Step 7: switch mode and release JS objects.
-    _buf = newBuf
-    _capacity = soaCapacity
-    _mode = 'soa'
-    _items = null as unknown as object[]
-  }
-
-  // ---------------------------------------------------------------------------
-  // Return the vec as a plain object literal with getters where needed.
-  // Closures are created once here (vec() call time), never inside hot paths.
-  // ---------------------------------------------------------------------------
-  return {
-    push(): Handle<F> {
-      assertLive()
-      if (_mode === 'soa') {
-        if (_len >= _capacity) {
-          grow()
-        }
-        const slot = _len
-        _len++
-        // SoA _rebase takes only (slot) — no DataView, no byte offset.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated and not in static TS type
-        ;((_handle as any)._rebase(slot))
-        return _handle
-      } else {
-        // JS mode: create a plain JS object and push into _items.
-        // The plain JS object IS the handle — no wrapper needed.
-        const obj = _createJSObject!()
-        _items.push(obj)
-        _len++
-        // Auto-graduation: when len reaches the threshold, switch to SoA mode.
-        // The item just pushed is included in _items before graduation runs, so
-        // all data (including this new item) is copied to SoA columns.
-        if (_len >= _graduateAt) {
-          graduateToSoA()
-          // After graduation, _handle is the SoA handle. Rebase it to the slot
-          // of the item we just pushed.
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is code-generated
-          ;((_handle as any)._rebase(_len - 1))
-          return _handle
-        }
-        return obj as unknown as Handle<F>
-      }
-    },
-
-    pop(): void {
-      assertLive()
-      if (_mode === 'soa') {
-        if (_len === 0) {
-          throw new Error('vec is empty')
-        }
-        _len--
-      } else {
-        // JS mode
-        if (_len === 0) {
-          throw new Error('vec is empty')
-        }
-        _items.pop()
-        _len--
-      }
-    },
-
-    get(index: number): Handle<F> {
-      assertLive()
-      if (_mode === 'soa') {
-        if (index < 0 || index >= _len) {
-          throw new Error('index out of range')
-        }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- same bridge as push()
-        ;((_handle as any)._rebase(index))
-        return _handle
-      } else {
-        // JS mode: return the plain JS object directly
-        if (index < 0 || index >= _len) {
-          throw new Error('index out of range')
-        }
-        return _items[index] as unknown as Handle<F>
-      }
-    },
-
-    swapRemove(index: number): void {
-      assertLive()
-      if (_mode === 'soa') {
-        if (index < 0 || index >= _len) {
-          throw new Error('index out of range')
-        }
-        // Copy all column values from last element into index.
-        // When index === _len - 1, this is a self-assignment (harmless).
-        // _swapFn is a codegen-unrolled function (generated via new Function() at
-        // construction/growth time) that writes each column directly without a loop.
-        _swapFn(index, _len - 1)
-        _len--
-      } else {
-        // JS mode
-        if (index < 0 || index >= _len) {
-          throw new Error('index out of range')
-        }
-        const last = _len - 1
-        // Move the last item to the removed slot.
-        // When index === last, this is a self-assignment (harmless).
-        _items[index] = _items[last]!
-        _items.pop()
-        _len--
-      }
-    },
-
-    remove(index: number): void {
-      assertLive()
-      if (_mode === 'soa') {
-        if (index < 0 || index >= _len) {
-          throw new Error('index out of range')
-        }
-        // Shift all elements after index left by one position.
-        // TypedArray.copyWithin handles overlapping ranges correctly.
-        // Use pre-extracted _columnArrays to avoid Map.get() per column per call.
-        for (let c = 0; c < _columnArrays.length; c++) {
-          _columnArrays[c]!.copyWithin(index, index + 1, _len)
-        }
-        _len--
-      } else {
-        // JS mode
-        if (index < 0 || index >= _len) {
-          throw new Error('index out of range')
-        }
-        _items.splice(index, 1)
-        _len--
-      }
-    },
-
-    get len(): number {
-      return _len
-    },
-
-    get capacity(): number {
-      if (_mode === 'js') {
-        // JS arrays grow automatically; capacity === len in JS mode.
-        return _len
-      }
-      return _capacity
-    },
-
-    clear(): void {
-      assertLive()
-      if (_mode === 'js') {
-        _items.length = 0
-      }
-      _len = 0
-    },
-
-    drop(): void {
-      assertLive()
-      _dropped = true
-      if (_mode === 'js') {
-        // Null out _items so GC can reclaim the objects.
-        _items = null as unknown as object[]
-      } else {
-        // Null out internal references so GC can reclaim them.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ;(this as any)._buf = null
-      }
-    },
-
-    get buffer(): ArrayBuffer {
-      assertLive()
-      if (_mode === 'js') {
-        // buffer is not available in JS mode — but we keep this guard for
-        // vecs that are permanently in JS mode (mode: 'js' option, task-4).
-        throw new Error('buffer not available in JS mode')
-      }
-      return _buf
-    },
-
-    column<K extends ColumnKey<F>>(name: K): ColumnType<F, K> {
-      assertLive()
-      if (_mode === 'js') {
-        // Auto-graduate: caller clearly wants TypedArray (SoA) data.
-        // This is a one-time cost — subsequent column() calls are free.
-        graduateToSoA()
-      }
-      const arr = _columnMap.get(name)
-      if (arr === undefined) {
-        throw new Error(`unknown column: ${name}`)
-      }
-      // The runtime TypedArray subclass for this column was determined by the column's
-      // numeric token at vec construction time and is guaranteed to match ColumnType<F, K>.
-      return arr as unknown as ColumnType<F, K>
-    },
-
-    [Symbol.iterator](): Iterator<Handle<F>> {
-      if (_mode === 'soa') {
-        // One iterator object allocated per for..of call.
-        // Each next() call rebases the shared handle — zero allocation per step.
-        let cursor = 0
-        return {
-          next(): IteratorResult<Handle<F>> {
-            assertLive()
-            if (cursor < _len) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is code-generated
-              ;((_handle as any)._rebase(cursor))
-              cursor++
-              return { value: _handle, done: false }
-            }
-            return { value: undefined as unknown as Handle<F>, done: true }
-          },
-        }
-      } else {
-        // JS mode iterator: yield plain JS objects directly
-        let cursor = 0
-        return {
-          next(): IteratorResult<Handle<F>> {
-            assertLive()
-            if (cursor < _len) {
-              const obj = _items[cursor]!
-              cursor++
-              return { value: obj as unknown as Handle<F>, done: false }
-            }
-            return { value: undefined as unknown as Handle<F>, done: true }
-          },
-        }
-      }
-    },
-
-    forEach(cb: (handle: Handle<F>, index: number) => void): void {
-      assertLive()
-      if (_mode === 'soa') {
-        // Internal counted loop — no iterator protocol, no per-call allocation.
-        // Reuses the single shared handle instance by rebasing it to each index.
-        for (let i = 0; i < _len; i++) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated and not in static TS type
-          ;((_handle as any)._rebase(i))
-          cb(_handle, i)
-        }
-      } else {
-        // JS mode: pass plain JS objects directly — no wrapper needed.
-        for (let i = 0; i < _len; i++) {
-          cb(_items[i] as unknown as Handle<F>, i)
-        }
-      }
-    },
-
-    reserve(n: number): void {
-      assertLive()
-      if (!Number.isInteger(n) || n <= 0) {
-        throw new Error('vec.reserve: n must be a positive integer')
-      }
-      if (_mode === 'js') {
-        // JS arrays grow automatically — reserve is a no-op in JS mode.
-        return
-      }
-      // No-op if already large enough.
-      if (_capacity >= n) return
-
-      // Grow to exactly n.
-      const newBuf = new ArrayBuffer(layout.sizeofPerSlot * n)
-
-      // Snapshot old columns before rebuilding.
-      const oldColumnArrays = _columnArrays.slice()
-
-      // Build new columns over the new buffer.
-      buildColumns(newBuf, n)
-
-      // Copy existing data from old columns to new columns.
-      for (let c = 0; c < _columnArrays.length; c++) {
-        _columnArrays[c]!.set(oldColumnArrays[c]!)
-      }
-
-      // Update internal state.
-      _buf = newBuf
-      _capacity = n
-
-      // Re-create handle with new column refs (Strategy A) — same as grow().
-      HandleClass = generateSoAHandleClass(layout.handleTree, columnRefs)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      _handle = new (HandleClass as any)(0) as Handle<F>
-    },
-
-    get mode(): 'js' | 'soa' {
-      return _mode
-    },
-
-    get isGraduated(): boolean {
-      return _mode === 'soa'
-    },
-
-    graduate(): void {
-      assertLive()
-      if (_mode === 'js') {
-        graduateToSoA()
-      }
-    },
-  }
+  return new VecImpl(def, opts)
 }
