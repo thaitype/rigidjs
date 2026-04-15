@@ -6,5 +6,5 @@ export type { Slab, Handle } from './slab/slab.js'
 // milestone-3 type helpers — exported as type-only; the runtime method (slab.column())
 // that uses them ships in task-3.
 export type { ColumnKey, ColumnType } from './types.js'
-// milestone-4 vec type
-export type { Vec } from './vec/vec.js'
+// milestone-4 vec type; milestone-7 options API
+export type { Vec, VecOptions } from './vec/vec.js'

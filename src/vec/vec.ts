@@ -213,6 +213,46 @@ export interface Vec<F extends StructFields> {
 }
 
 // ---------------------------------------------------------------------------
+// Options API
+// ---------------------------------------------------------------------------
+
+/**
+ * Options for configuring the vec storage mode and graduation behavior.
+ *
+ * | Call | Mode | Graduation |
+ * |------|------|------------|
+ * | `vec(T)` | JS, graduates at 128 | auto |
+ * | `vec(T, 100)` | SoA immediately, capacity=100 | N/A (already SoA) |
+ * | `vec(T, { capacity: 100 })` | SoA immediately, capacity=100 | N/A |
+ * | `vec(T, { mode: 'soa' })` | SoA immediately, capacity=16 | N/A |
+ * | `vec(T, { mode: 'js' })` | JS permanently | never |
+ * | `vec(T, { graduateAt: 256 })` | JS, graduates at 256 | auto |
+ * | `vec(T, { mode: 'soa', capacity: 1000 })` | SoA, capacity=1000 | N/A |
+ * | `vec(T, { mode: 'js', graduateAt: 256 })` | JS permanently (graduateAt ignored) | never |
+ */
+export interface VecOptions {
+  /**
+   * Pre-allocate SoA capacity. Implies mode: 'soa' — no point starting in JS mode
+   * if you already know the required size.
+   * Must be a positive integer.
+   */
+  capacity?: number
+  /**
+   * Force a specific storage mode.
+   * - 'soa': start in SoA mode immediately (default capacity 16 if not specified)
+   * - 'js': stay in JS mode permanently, never auto-graduate
+   */
+  mode?: 'js' | 'soa'
+  /**
+   * Custom graduation threshold for hybrid mode (default 128).
+   * The vec auto-graduates to SoA when len reaches this value.
+   * Only applies when mode is not explicitly set ('js' or 'soa').
+   * Must be a positive integer.
+   */
+  graduateAt?: number
+}
+
+// ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
@@ -220,9 +260,10 @@ export interface Vec<F extends StructFields> {
  * Create a growable vec container for the given struct definition.
  *
  * Modes:
- *   - `vec(def)` — no capacity → starts in JS mode (plain JS objects, low init cost).
- *     Graduation to SoA mode is handled in Task 3.
- *   - `vec(def, capacity)` — starts in SoA mode (TypedArray columns, fixed capacity).
+ *   - `vec(def)` — hybrid mode: starts in JS mode (plain JS objects, low init cost),
+ *     auto-graduates to SoA when len reaches the graduation threshold (default 128).
+ *   - `vec(def, capacity)` — backward compat: starts in SoA mode with given capacity.
+ *   - `vec(def, options)` — full options API; see VecOptions for all combinations.
  *
  * SoA storage layout (identical to slab):
  *   - Exactly ONE `ArrayBuffer` of size `sizeofPerSlot * capacity`.
@@ -237,25 +278,64 @@ export interface Vec<F extends StructFields> {
  *   called again with the new column refs to produce a new handle. One allocation
  *   per growth event. Column refs captured in the handle closure are always current.
  *
- * @param def              A StructDef produced by struct().
- * @param initialCapacity  Starting capacity. When provided, vec starts in SoA mode.
- *                         When omitted, vec starts in JS mode.
- * @throws if initialCapacity is not a positive integer (when provided).
+ * @param def   A StructDef produced by struct().
+ * @param opts  Optional: number (backward compat capacity) or VecOptions object.
+ * @throws if capacity is not a positive integer (when provided).
+ * @throws if graduateAt is not a positive integer (when provided).
+ * @throws if mode === 'js' and capacity is also set (contradictory options).
  * @throws if def._columnLayout is absent (def was not produced by struct()).
  */
 export function vec<F extends StructFields>(
   def: StructDef<F>,
-  initialCapacity?: number,
+  opts?: number | VecOptions,
 ): Vec<F> {
-  // --- Mode selection ---
-  // No capacity → JS mode (low-overhead, plain JS objects)
-  // With capacity → SoA mode (TypedArray columns, for large-scale use)
-  const jsMode = initialCapacity === undefined
+  // ---------------------------------------------------------------------------
+  // Parse options
+  // ---------------------------------------------------------------------------
+  let resolvedMode: 'js' | 'soa' | 'hybrid' = 'hybrid'
+  let initialCapacity: number | undefined
+  let graduateAt = 128
+
+  if (typeof opts === 'number') {
+    // Backward compat: vec(T, 16) → SoA mode, capacity=16
+    resolvedMode = 'soa'
+    initialCapacity = opts
+  } else if (opts !== undefined) {
+    // Validate contradictory options before anything else
+    if (opts.mode === 'js' && opts.capacity !== undefined) {
+      throw new Error('vec: cannot combine mode "js" with capacity (capacity implies SoA mode)')
+    }
+
+    if (opts.mode === 'soa' || opts.capacity !== undefined) {
+      resolvedMode = 'soa'
+      initialCapacity = opts.capacity
+    } else if (opts.mode === 'js') {
+      resolvedMode = 'js'  // permanent JS mode — never graduate
+    }
+    // else: resolvedMode stays 'hybrid'
+
+    if (opts.graduateAt !== undefined) {
+      if (!Number.isInteger(opts.graduateAt) || opts.graduateAt <= 0) {
+        throw new Error('vec: graduateAt must be a positive integer')
+      }
+      graduateAt = opts.graduateAt
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Determine internal jsMode flag and _graduateAt
+  // ---------------------------------------------------------------------------
+  // jsMode=true  → start with JS objects (hybrid or permanent-js)
+  // jsMode=false → start with SoA TypedArray columns immediately
+  const jsMode = resolvedMode !== 'soa'
+  // _graduateAt: threshold for auto-graduation in hybrid mode.
+  // Infinity disables auto-graduation (permanent JS mode).
+  const _graduateAt = resolvedMode === 'js' ? Infinity : graduateAt
 
   if (!jsMode) {
     // --- Validation for SoA mode ---
-    if (!Number.isInteger(initialCapacity) || initialCapacity! <= 0) {
-      throw new Error('vec: initialCapacity must be a positive integer')
+    if (initialCapacity !== undefined && (!Number.isInteger(initialCapacity) || initialCapacity <= 0)) {
+      throw new Error('vec: capacity must be a positive integer')
     }
   }
 
@@ -274,10 +354,6 @@ export function vec<F extends StructFields>(
   // Transitions to 'soa' on graduation (auto at threshold, or explicit .graduate()/.column()).
   // Once 'soa', never reverts to 'js'.
   let _mode: 'soa' | 'js' = jsMode ? 'js' : 'soa'
-
-  // Default graduation threshold. JS mode automatically promotes to SoA when len >= this.
-  // Configurable via options API in task-4; hardcoded here per task-3 spec.
-  const _graduateAt = 128
 
   // Helper created once at vec() call time — single closure allocation, not per-call.
   function assertLive(): void {
@@ -318,9 +394,13 @@ export function vec<F extends StructFields>(
     | Float64Array | Float32Array | Uint32Array | Uint16Array | Uint8Array
     | Int32Array | Int16Array | Int8Array
 
+  // Default SoA capacity when mode: 'soa' is forced without an explicit capacity.
+  const SOA_DEFAULT_CAPACITY = 16
+  const soaInitialCapacity = jsMode ? 0 : (initialCapacity ?? SOA_DEFAULT_CAPACITY)
+
   // SoA-only state — initialized to null in JS mode to avoid unnecessary allocation.
-  let _buf: ArrayBuffer = jsMode ? (null as unknown as ArrayBuffer) : new ArrayBuffer(layout.sizeofPerSlot * initialCapacity!)
-  let _capacity: number = jsMode ? 0 : initialCapacity!
+  let _buf: ArrayBuffer = jsMode ? (null as unknown as ArrayBuffer) : new ArrayBuffer(layout.sizeofPerSlot * soaInitialCapacity)
+  let _capacity: number = jsMode ? 0 : soaInitialCapacity
   let _columnMap = new Map<string, AnyTypedArray>()
   let columnRefs = new Map<string, ColumnRef>()
   // Pre-extracted column arrays for allocation-free hot-path access in swapRemove/remove.
