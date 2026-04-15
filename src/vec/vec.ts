@@ -2,6 +2,7 @@ import type { StructDef, StructFields, Handle, ColumnKey, ColumnType } from '../
 import { computeColumnLayout } from '../struct/layout.js'
 import { generateSoAHandleClass } from '../struct/handle-codegen.js'
 import type { ColumnRef } from '../struct/handle-codegen.js'
+import { generateJSObjectFactory, generateJSHandleClass } from './js-codegen.js'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -188,12 +189,15 @@ export interface Vec<F extends StructFields> {
 // Factory
 // ---------------------------------------------------------------------------
 
-const DEFAULT_CAPACITY = 16
-
 /**
  * Create a growable vec container for the given struct definition.
  *
- * Storage layout (SoA — identical to slab):
+ * Modes:
+ *   - `vec(def)` — no capacity → starts in JS mode (plain JS objects, low init cost).
+ *     Graduation to SoA mode is handled in Task 3.
+ *   - `vec(def, capacity)` — starts in SoA mode (TypedArray columns, fixed capacity).
+ *
+ * SoA storage layout (identical to slab):
  *   - Exactly ONE `ArrayBuffer` of size `sizeofPerSlot * capacity`.
  *   - Columns are laid out in natural-alignment order (largest element size first).
  *   - One TypedArray sub-view per column: `new TypedArrayCtor(buf, byteOffset * capacity, capacity)`.
@@ -207,7 +211,8 @@ const DEFAULT_CAPACITY = 16
  *   per growth event. Column refs captured in the handle closure are always current.
  *
  * @param def              A StructDef produced by struct().
- * @param initialCapacity  Starting capacity. Defaults to 16.
+ * @param initialCapacity  Starting capacity. When provided, vec starts in SoA mode.
+ *                         When omitted, vec starts in JS mode.
  * @throws if initialCapacity is not a positive integer (when provided).
  * @throws if def._columnLayout is absent (def was not produced by struct()).
  */
@@ -215,22 +220,60 @@ export function vec<F extends StructFields>(
   def: StructDef<F>,
   initialCapacity?: number,
 ): Vec<F> {
-  const capacity = initialCapacity ?? DEFAULT_CAPACITY
+  // --- Mode selection ---
+  // No capacity → JS mode (low-overhead, plain JS objects)
+  // With capacity → SoA mode (TypedArray columns, for large-scale use)
+  const jsMode = initialCapacity === undefined
 
-  // --- Validation ---
-  if (!Number.isInteger(capacity) || capacity <= 0) {
-    throw new Error('vec: initialCapacity must be a positive integer')
+  if (!jsMode) {
+    // --- Validation for SoA mode ---
+    if (!Number.isInteger(initialCapacity) || initialCapacity! <= 0) {
+      throw new Error('vec: initialCapacity must be a positive integer')
+    }
   }
 
-  // --- Compute column layout ---
+  // --- Compute column layout (needed for SoA mode) ---
   // Use the pre-computed layout from def._columnLayout if available;
   // otherwise fall back to computing it (supports calling vec() with a raw StructDef).
   const layout = def._columnLayout ?? computeColumnLayout(def.fields)
 
-  // --- Single ArrayBuffer allocation ---
-  // Total bytes = sizeofPerSlot * capacity.
-  let _buf = new ArrayBuffer(layout.sizeofPerSlot * capacity)
-  let _capacity = capacity
+  // ---------------------------------------------------------------------------
+  // Shared state
+  // ---------------------------------------------------------------------------
+
+  let _len = 0
+  let _dropped = false
+  // Mode is set at construction time based on whether initialCapacity was provided.
+  // In this task, mode is fixed for the lifetime of the vec (graduation is task-3).
+  const _mode: 'soa' | 'js' = jsMode ? 'js' : 'soa'
+
+  // Helper created once at vec() call time — single closure allocation, not per-call.
+  function assertLive(): void {
+    if (_dropped) throw new Error('vec has been dropped')
+  }
+
+  // ---------------------------------------------------------------------------
+  // JS mode state
+  // ---------------------------------------------------------------------------
+
+  // _items: plain JS objects backing store for JS mode.
+  // Only used when _mode === 'js'.
+  let _items: object[] = jsMode ? [] : (null as unknown as object[])
+
+  // Reusable JS handle (rebased per operation, never allocated per-call).
+  // Only used when _mode === 'js'.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSHandleConstructor returns `object`; any isolates the bridge
+  const JSHandleClass = jsMode ? generateJSHandleClass(def.fields) : (null as any)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let _jsHandle: any = jsMode ? new (JSHandleClass as any)({}) : null
+
+  // Factory function to create JS objects with stable hidden class.
+  // Only used when _mode === 'js'.
+  const _createJSObject: (() => object) | null = jsMode ? generateJSObjectFactory(def.fields) : null
+
+  // ---------------------------------------------------------------------------
+  // SoA mode state
+  // ---------------------------------------------------------------------------
 
   // --- Build one TypedArray sub-view per column ---
   //
@@ -243,6 +286,9 @@ export function vec<F extends StructFields>(
     | Float64Array | Float32Array | Uint32Array | Uint16Array | Uint8Array
     | Int32Array | Int16Array | Int8Array
 
+  // SoA-only state — initialized to null in JS mode to avoid unnecessary allocation.
+  let _buf: ArrayBuffer = jsMode ? (null as unknown as ArrayBuffer) : new ArrayBuffer(layout.sizeofPerSlot * initialCapacity!)
+  let _capacity: number = jsMode ? 0 : initialCapacity!
   let _columnMap = new Map<string, AnyTypedArray>()
   let columnRefs = new Map<string, ColumnRef>()
   // Pre-extracted column arrays for allocation-free hot-path access in swapRemove/remove.
@@ -251,11 +297,8 @@ export function vec<F extends StructFields>(
 
   // Codegen-unrolled swap function for swapRemove hot path.
   // Generated via new Function() at construction time and on every growth/reserve event.
-  // Column count is known at vec() call time, so we unroll the per-column copy loop
-  // into N direct TypedArray writes: c0[i]=c0[last]; c1[i]=c1[last]; ...
-  // This eliminates the generic loop overhead and allows JSC to inline each write.
-  // Benchmarks: ~9x faster than the generic loop for 3-column structs in isolation.
-  let _swapFn: (index: number, lastIndex: number) => void
+  // eslint-disable-next-line prefer-const -- reassigned in buildColumns
+  let _swapFn: (index: number, lastIndex: number) => void = () => {}
 
   /**
    * Generate an unrolled swapRemove inner function for the given column arrays.
@@ -312,40 +355,19 @@ export function vec<F extends StructFields>(
     _swapFn = generateSwapFn(_columnArrays)
   }
 
-  buildColumns(_buf, _capacity)
-
   // --- Build the reusable SoA handle ---
   // generateSoAHandleClass builds a class whose field getters/setters do pure TypedArray
   // indexed access: `this._c_pos_x[this._slot]`. Column TypedArrays are captured in the
   // class closure at construction time.
-  let HandleClass = generateSoAHandleClass(layout.handleTree, columnRefs)
+  let HandleClass = jsMode ? (null as unknown as ReturnType<typeof generateSoAHandleClass>) : (
+    // Only build columns and handle in SoA mode.
+    (buildColumns(_buf, _capacity), generateSoAHandleClass(layout.handleTree, columnRefs))
+  )
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SoAHandleConstructor returns `object`; any isolates the bridge
-  let _handle = new (HandleClass as any)(0) as Handle<F>
-
-  let _len = 0
-  let _dropped = false
-
-  // ---------------------------------------------------------------------------
-  // Mode dispatch — GATE EXPERIMENT (milestone-7 task-1)
-  //
-  // _mode is initialized once at construction to 'soa' and never changed.
-  // This makes it a compile-time constant from the JIT's perspective after
-  // warmup: the branch prediction sees a monomorphic path and the dead 'js'
-  // branch is elided. The experiment measures whether this branch adds any
-  // measurable overhead at large scale (>2% regression = FAIL).
-  //
-  // The else path throws intentionally — it will never execute during benchmarks
-  // or tests. If _mode were ever set to 'js' it would hit an unimplemented guard.
-  // ---------------------------------------------------------------------------
-  const _mode: 'soa' | 'js' = 'soa'
-
-  // Helper created once at vec() call time — single closure allocation, not per-call.
-  function assertLive(): void {
-    if (_dropped) throw new Error('vec has been dropped')
-  }
+  let _handle: Handle<F> = jsMode ? (null as unknown as Handle<F>) : new (HandleClass as any)(0) as Handle<F>
 
   /**
-   * Grow the backing buffer to 2x capacity.
+   * Grow the SoA backing buffer to 2x capacity.
    *
    * Steps:
    *  1. Compute newCapacity = _capacity * 2.
@@ -397,8 +419,8 @@ export function vec<F extends StructFields>(
   // ---------------------------------------------------------------------------
   return {
     push(): Handle<F> {
+      assertLive()
       if (_mode === 'soa') {
-        assertLive()
         if (_len >= _capacity) {
           grow()
         }
@@ -409,25 +431,36 @@ export function vec<F extends StructFields>(
         ;((_handle as any)._rebase(slot))
         return _handle
       } else {
-        throw new Error('not implemented: js mode')
+        // JS mode: create a plain JS object and push into _items.
+        const obj = _createJSObject!()
+        _items.push(obj)
+        _jsHandle._rebase(obj)
+        _jsHandle._slot = _len
+        _len++
+        return _jsHandle as Handle<F>
       }
     },
 
     pop(): void {
+      assertLive()
       if (_mode === 'soa') {
-        assertLive()
         if (_len === 0) {
           throw new Error('vec is empty')
         }
         _len--
       } else {
-        throw new Error('not implemented: js mode')
+        // JS mode
+        if (_len === 0) {
+          throw new Error('vec is empty')
+        }
+        _items.pop()
+        _len--
       }
     },
 
     get(index: number): Handle<F> {
+      assertLive()
       if (_mode === 'soa') {
-        assertLive()
         if (index < 0 || index >= _len) {
           throw new Error('index out of range')
         }
@@ -435,13 +468,19 @@ export function vec<F extends StructFields>(
         ;((_handle as any)._rebase(index))
         return _handle
       } else {
-        throw new Error('not implemented: js mode')
+        // JS mode
+        if (index < 0 || index >= _len) {
+          throw new Error('index out of range')
+        }
+        _jsHandle._rebase(_items[index]!)
+        _jsHandle._slot = index
+        return _jsHandle as Handle<F>
       }
     },
 
     swapRemove(index: number): void {
+      assertLive()
       if (_mode === 'soa') {
-        assertLive()
         if (index < 0 || index >= _len) {
           throw new Error('index out of range')
         }
@@ -452,13 +491,22 @@ export function vec<F extends StructFields>(
         _swapFn(index, _len - 1)
         _len--
       } else {
-        throw new Error('not implemented: js mode')
+        // JS mode
+        if (index < 0 || index >= _len) {
+          throw new Error('index out of range')
+        }
+        const last = _len - 1
+        // Move the last item to the removed slot.
+        // When index === last, this is a self-assignment (harmless).
+        _items[index] = _items[last]!
+        _items.pop()
+        _len--
       }
     },
 
     remove(index: number): void {
+      assertLive()
       if (_mode === 'soa') {
-        assertLive()
         if (index < 0 || index >= _len) {
           throw new Error('index out of range')
         }
@@ -470,7 +518,12 @@ export function vec<F extends StructFields>(
         }
         _len--
       } else {
-        throw new Error('not implemented: js mode')
+        // JS mode
+        if (index < 0 || index >= _len) {
+          throw new Error('index out of range')
+        }
+        _items.splice(index, 1)
+        _len--
       }
     },
 
@@ -479,29 +532,47 @@ export function vec<F extends StructFields>(
     },
 
     get capacity(): number {
+      if (_mode === 'js') {
+        // JS arrays grow automatically; capacity === len in JS mode.
+        return _len
+      }
       return _capacity
     },
 
     clear(): void {
       assertLive()
+      if (_mode === 'js') {
+        _items.length = 0
+      }
       _len = 0
     },
 
     drop(): void {
       assertLive()
       _dropped = true
-      // Null out internal references so GC can reclaim them.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(this as any)._buf = null
+      if (_mode === 'js') {
+        // Null out _items so GC can reclaim the objects.
+        _items = null as unknown as object[]
+      } else {
+        // Null out internal references so GC can reclaim them.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ;(this as any)._buf = null
+      }
     },
 
     get buffer(): ArrayBuffer {
       assertLive()
+      if (_mode === 'js') {
+        throw new Error('buffer not available in JS mode')
+      }
       return _buf
     },
 
     column<K extends ColumnKey<F>>(name: K): ColumnType<F, K> {
       assertLive()
+      if (_mode === 'js') {
+        throw new Error('column() not available in JS mode yet — will trigger graduation in task-3')
+      }
       const arr = _columnMap.get(name)
       if (arr === undefined) {
         throw new Error(`unknown column: ${name}`)
@@ -529,13 +600,26 @@ export function vec<F extends StructFields>(
           },
         }
       } else {
-        throw new Error('not implemented: js mode')
+        // JS mode iterator
+        let cursor = 0
+        return {
+          next(): IteratorResult<Handle<F>> {
+            assertLive()
+            if (cursor < _len) {
+              _jsHandle._rebase(_items[cursor]!)
+              _jsHandle._slot = cursor
+              cursor++
+              return { value: _jsHandle as Handle<F>, done: false }
+            }
+            return { value: undefined as unknown as Handle<F>, done: true }
+          },
+        }
       }
     },
 
     forEach(cb: (handle: Handle<F>, index: number) => void): void {
+      assertLive()
       if (_mode === 'soa') {
-        assertLive()
         // Internal counted loop — no iterator protocol, no per-call allocation.
         // Reuses the single shared handle instance by rebasing it to each index.
         for (let i = 0; i < _len; i++) {
@@ -544,7 +628,12 @@ export function vec<F extends StructFields>(
           cb(_handle, i)
         }
       } else {
-        throw new Error('not implemented: js mode')
+        // JS mode: loop _items, rebase JSHandle to each.
+        for (let i = 0; i < _len; i++) {
+          _jsHandle._rebase(_items[i]!)
+          _jsHandle._slot = i
+          cb(_jsHandle as Handle<F>, i)
+        }
       }
     },
 
@@ -552,6 +641,10 @@ export function vec<F extends StructFields>(
       assertLive()
       if (!Number.isInteger(n) || n <= 0) {
         throw new Error('vec.reserve: n must be a positive integer')
+      }
+      if (_mode === 'js') {
+        // JS arrays grow automatically — reserve is a no-op in JS mode.
+        return
       }
       // No-op if already large enough.
       if (_capacity >= n) return

@@ -26,9 +26,11 @@ describe('vec construction', () => {
     expect(v.capacity).toBe(10)
   })
 
-  it('default capacity is 16 when no second argument given', () => {
+  it('default mode is JS mode when no capacity given (milestone-7)', () => {
+    // vec(def) with no capacity starts in JS mode.
+    // In JS mode, capacity === len (JS arrays grow automatically).
     const v = vec(Point2D)
-    expect(v.capacity).toBe(16)
+    expect(v.capacity).toBe(0) // no items yet, capacity tracks len
     expect(v.len).toBe(0)
   })
 
