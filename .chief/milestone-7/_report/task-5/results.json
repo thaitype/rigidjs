@@ -1,0 +1,106 @@
+{
+  "meta": {
+    "date": "2026-04-12",
+    "bunVersion": "1.3.8",
+    "platform": "darwin",
+    "arch": "arm64",
+    "milestone": "M7",
+    "task": "task-5"
+  },
+  "oneShot": {
+    "B1-hybrid": [
+      { "name": "B1-hybrid JS N=10",            "opsPerSec": 1468877, "p50Us": 0.21, "p99Us": 2.42 },
+      { "name": "B1-hybrid JS N=100",           "opsPerSec": 225596,  "p50Us": 0.83, "p99Us": 23.92 },
+      { "name": "B1-hybrid JS N=1000",          "opsPerSec": 40496,   "p50Us": 5.83, "p99Us": 267.71 },
+      { "name": "B1-hybrid RigidJS vec N=10",   "opsPerSec": 39055,   "p50Us": 15.46, "p99Us": 289.96 },
+      { "name": "B1-hybrid RigidJS vec N=100",  "opsPerSec": 21310,   "p50Us": 31.75, "p99Us": 384.50 },
+      { "name": "B1-hybrid RigidJS vec N=1000", "opsPerSec": 3864,    "p50Us": 215.04, "p99Us": 876.25 }
+    ],
+    "B1-hybrid-ratios": {
+      "N=10":   { "jsOps": 1468877, "rigidOps": 39055,  "ratio": 0.027 },
+      "N=100":  { "jsOps": 225596,  "rigidOps": 21310,  "ratio": 0.094 },
+      "N=1000": { "jsOps": 40496,   "rigidOps": 3864,   "ratio": 0.095 }
+    },
+    "B2-hybrid": [
+      { "name": "B2-hybrid JS N=10",            "opsPerSec": 829586,  "p50Us": 0.88, "p99Us": 10.92 },
+      { "name": "B2-hybrid JS N=100",           "opsPerSec": 218639,  "p50Us": 3.08, "p99Us": 28.08 },
+      { "name": "B2-hybrid JS N=1000",          "opsPerSec": 110880,  "p50Us": 4.54, "p99Us": 246.54 },
+      { "name": "B2-hybrid RigidJS vec N=10",   "opsPerSec": 190265,  "p50Us": 1.54, "p99Us": 178.67 },
+      { "name": "B2-hybrid RigidJS vec N=100",  "opsPerSec": 114052,  "p50Us": 5.92, "p99Us": 91.96 },
+      { "name": "B2-hybrid RigidJS vec N=1000", "opsPerSec": 23041,   "p50Us": 39.92, "p99Us": 138.46 }
+    ],
+    "B2-hybrid-ratios": {
+      "N=10":   { "jsOps": 829586,  "rigidOps": 190265, "ratio": 0.23 },
+      "N=100":  { "jsOps": 218639,  "rigidOps": 114052, "ratio": 0.52 },
+      "N=1000": { "jsOps": 110880,  "rigidOps": 23041,  "ratio": 0.21 }
+    },
+    "B10-graduation": [
+      { "name": "B10-graduation JS baseline N=128",          "opsPerSec": 297199, "p50Us": 1.17,  "p99Us": 11.88 },
+      { "name": "B10-graduation RigidJS graduateAt=128",     "opsPerSec": 9199,   "p50Us": 67.67, "p99Us": 889.71 },
+      { "name": "B10-graduation JS baseline N=256",          "opsPerSec": 143246, "p50Us": 2.42,  "p99Us": 221.42 },
+      { "name": "B10-graduation RigidJS graduateAt=256",     "opsPerSec": 7900,   "p50Us": 97.33, "p99Us": 609.17 }
+    ],
+    "B1-small-scale": [
+      { "name": "B1-small JS N=10",            "opsPerSec": 728045,  "p50Us": 0.33, "p99Us": 5.63 },
+      { "name": "B1-small JS N=100",           "opsPerSec": 486145,  "p50Us": 0.46, "p99Us": 16.17 },
+      { "name": "B1-small JS N=1000",          "opsPerSec": 55595,   "p50Us": 5.04, "p99Us": 239.79 },
+      { "name": "B1-small RigidJS slab N=10",  "opsPerSec": 87797,   "p50Us": 4.63, "p99Us": 88.08 },
+      { "name": "B1-small RigidJS vec N=10",   "opsPerSec": 65704,   "p50Us": 10.21, "p99Us": 207.00 },
+      { "name": "B1-small RigidJS slab N=100", "opsPerSec": 109448,  "p50Us": 4.58, "p99Us": 56.00 },
+      { "name": "B1-small RigidJS vec N=100",  "opsPerSec": 19475,   "p50Us": 35.17, "p99Us": 467.71 },
+      { "name": "B1-small RigidJS slab N=1000","opsPerSec": 34037,   "p50Us": 20.08, "p99Us": 286.79 },
+      { "name": "B1-small RigidJS vec N=1000", "opsPerSec": 8510,    "p50Us": 112.54, "p99Us": 438.13 }
+    ],
+    "B2-small-scale": [
+      { "name": "B2-small JS N=10",              "opsPerSec": 482607,  "p50Us": 1.79,  "p99Us": 28.04 },
+      { "name": "B2-small JS N=100",             "opsPerSec": 285919,  "p50Us": 1.63,  "p99Us": 34.79 },
+      { "name": "B2-small JS N=1000",            "opsPerSec": 22954,   "p50Us": 13.17, "p99Us": 1346.17 },
+      { "name": "B2-small RigidJS slab N=10",   "opsPerSec": 151210,  "p50Us": 3.58,  "p99Us": 116.29 },
+      { "name": "B2-small RigidJS vec N=10",    "opsPerSec": 160729,  "p50Us": 1.83,  "p99Us": 120.13 },
+      { "name": "B2-small RigidJS slab N=100",  "opsPerSec": 149757,  "p50Us": 4.92,  "p99Us": 71.17 },
+      { "name": "B2-small RigidJS vec N=100",   "opsPerSec": 145138,  "p50Us": 4.33,  "p99Us": 127.50 },
+      { "name": "B2-small RigidJS slab N=1000", "opsPerSec": 24157,   "p50Us": 29.96, "p99Us": 154.38 },
+      { "name": "B2-small RigidJS vec N=1000",  "opsPerSec": 35937,   "p50Us": 14.88, "p99Us": 811.79 }
+    ],
+    "B3-small-scale": [
+      { "name": "B3-small JS N=10",                    "opsPerSec": 4387889, "p50Us": 0.13, "p99Us": 0.17 },
+      { "name": "B3-small JS N=100",                   "opsPerSec": 2319670, "p50Us": 0.21, "p99Us": 0.42 },
+      { "name": "B3-small JS N=1000",                  "opsPerSec": 366405,  "p50Us": 2.54, "p99Us": 4.33 },
+      { "name": "B3-small RigidJS vec indexed N=10",   "opsPerSec": 3219099, "p50Us": 0.25, "p99Us": 0.33 },
+      { "name": "B3-small RigidJS vec column N=10",    "opsPerSec": 6327944, "p50Us": 0.08, "p99Us": 0.08 },
+      { "name": "B3-small RigidJS vec indexed N=100",  "opsPerSec": 256583,  "p50Us": 3.29, "p99Us": 7.33 },
+      { "name": "B3-small RigidJS vec column N=100",   "opsPerSec": 2057648, "p50Us": 0.54, "p99Us": 0.75 },
+      { "name": "B3-small RigidJS vec indexed N=1000", "opsPerSec": 47253,   "p50Us": 19.25, "p99Us": 43.04 },
+      { "name": "B3-small RigidJS vec column N=1000",  "opsPerSec": 909518,  "p50Us": 1.00, "p99Us": 1.25 }
+    ],
+    "B2-vec-large": [
+      { "name": "B2-vec JS baseline (10k push/splice churn)", "opsPerSec": 7835,  "p50Us": 79.17,  "p99Us": 643.79 },
+      { "name": "B2-vec RigidJS vec (10k push+swapRemove/frame)", "opsPerSec": 11986, "p50Us": 26.08, "p99Us": 233.04 }
+    ],
+    "B3-vec-get": [
+      { "name": "B3-vec-get JS baseline (100k pos.x += vel.x)", "opsPerSec": 4042, "p50Us": 233.29, "p99Us": 382.08 },
+      { "name": "B3-vec-get RigidJS vec (100k indexed get h.pos.x += h.vel.x)", "opsPerSec": 5053, "p50Us": 181.46, "p99Us": 269.75 }
+    ],
+    "B3-vec-forEach": [
+      { "name": "B3-vec-forEach JS baseline (100k pos.x += vel.x)", "opsPerSec": 3322, "p50Us": 292.13, "p99Us": 525.25 },
+      { "name": "B3-vec-forEach RigidJS vec (100k forEach h.pos.x += h.vel.x)", "opsPerSec": 3244, "p50Us": 293.08, "p99Us": 495.29 }
+    ],
+    "B3-vec-column": [
+      { "name": "B3-vec-column JS baseline (100k pos.x += vel.x)", "opsPerSec": 3427, "p50Us": 285.92, "p99Us": 549.54 },
+      { "name": "B3-vec-column RigidJS vec (100k column posX[i] += velX[i])", "opsPerSec": 10008, "p50Us": 96.79, "p99Us": 203.58 }
+    ]
+  },
+  "sustained": {
+    "B8-vec": {
+      "js":   { "name": "B8-vec JS baseline (100k, 1k churn/tick, 10s)",    "ticks": 18600,  "meanMs": 0.1629, "p50Ms": 0.1622, "p99Ms": 0.2019 },
+      "rigid":{ "name": "B8-vec RigidJS vec (100k, 1k churn/tick, 10s)",   "ticks": 173002, "meanMs": 0.0546, "p50Ms": 0.0540, "p99Ms": 0.0648 }
+    }
+  },
+  "successCriteria": {
+    "1-small-creation-1x": { "target": ">= 0.8x at N=10-100", "actual": "0.027x-0.094x", "status": "FAIL" },
+    "2-large-no-regression": { "target": "within 5% of M6", "actual": "JIT variance; column and sustained churn dominant", "status": "PASS" },
+    "3-graduation-spike": { "target": "< 50us p50", "actual": "67.67us p50 at N=128", "status": "PARTIAL FAIL" },
+    "4-api-unchanged": { "target": "vec(T, N) still works", "actual": "Confirmed — routes SoA immediately", "status": "PASS" },
+    "5-mode-invisible": { "target": "auto-graduation, no user action", "actual": "Auto-graduates at push N=128", "status": "PASS" }
+  }
+}

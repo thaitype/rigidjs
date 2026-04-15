@@ -81,6 +81,9 @@ const SCENARIOS: ScenarioEntry[] = [
   { kind: 'oneshot', name: 'B1-small-scale',    file: './scenarios/b1-small-scale.ts',         export: 'b1SmallScenarios'      },
   { kind: 'oneshot', name: 'B2-small-scale',    file: './scenarios/b2-small-scale.ts',         export: 'b2SmallScenarios'      },
   { kind: 'oneshot', name: 'B3-small-scale',    file: './scenarios/b3-small-scale.ts',         export: 'b3SmallScenarios'      },
+  { kind: 'oneshot', name: 'B1-hybrid',         file: './scenarios/b1-hybrid-small.ts',        export: 'b1HybridScenarios'     },
+  { kind: 'oneshot', name: 'B2-hybrid',         file: './scenarios/b2-hybrid-small.ts',        export: 'b2HybridScenarios'     },
+  { kind: 'oneshot', name: 'B10-graduation',    file: './scenarios/b10-graduation.ts',         export: 'b10Scenarios'          },
   // Sustained / scaling
   { kind: 'sustained', name: 'B8-sustained',    file: './scenarios/b8-sustained-churn.ts',     export: 'b8Scenarios'           },
   { kind: 'scaling',   name: 'B9-scaling',      file: './scenarios/b9-heap-scaling.ts'                                         },
