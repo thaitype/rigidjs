@@ -36,3 +36,5 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Benchmark raw time-series data — bulk arrays excluded from committed results.json
 # Written alongside every results.json as a companion file but never committed.
 .chief/**/_report/**/raw-timeseries.json
+
+tmp
