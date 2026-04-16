@@ -6,7 +6,7 @@
 
 **Memory primitives for JavaScript. Make memory easy to digest.**
 
-Fixed-capacity, contiguous, allocation-free data structures backed by `ArrayBuffer`. A small kit of primitives — `struct`, `slab`, and more to come — for writing code that does not fight the garbage collector in hot paths.
+Contiguous, allocation-free data structures backed by `ArrayBuffer`. A small kit of primitives — `struct`, `slab`, and `vec` — for writing code that does not fight the garbage collector in hot paths.
 
 Inspired by Rust's memory model. Not trying to be Rust.
 
@@ -44,7 +44,7 @@ Requires [Bun](https://bun.com) (runtime + test runner) and TypeScript 5.
 
 ## Quick look
 
-RigidJS has two ideas you need to understand before anything else makes sense: `struct` defines a shape, and `slab` allocates storage for many of that shape.
+RigidJS has three ideas you need to understand before anything else makes sense: `struct` defines a shape, `slab` allocates fixed-capacity storage, and `vec` gives you a growable container.
 
 ### 1. Define a struct
 
@@ -108,9 +108,52 @@ particles.remove(slotA)
 particles.drop()
 ```
 
-That is the whole mental model. Everything else is details.
+That is the slab mental model.
 
-### 4. Column access for hot loops
+### 4. Use a vec for growable collections
+
+A vec is like a slab but it grows. It starts small and expands as you push.
+
+```ts
+import { vec } from 'rigidjs'
+
+const enemies = vec(Particle)
+
+for (let i = 0; i < 1000; i++) {
+  const e = enemies.push()
+  e.pos.x = i * 2.0
+  e.pos.y = 0
+  e.life = 1.0
+  e.id = i
+}
+
+// Iterate with for..of
+for (const e of enemies) {
+  e.life -= 0.016
+}
+
+// O(1) removal (swaps with last element)
+enemies.swapRemove(42)
+
+// O(n) removal (preserves order)
+enemies.remove(10)
+
+enemies.drop()
+```
+
+By default, vec uses a **hybrid mode**: it stores entities as plain JS objects while the collection is small, then automatically graduates to SoA (Structure-of-Arrays) layout when `len` reaches 128. This gives you fast creation at small sizes and fast iteration at scale — without choosing upfront.
+
+You can control this explicitly:
+
+```ts
+// Always SoA from the start (good when you know it will be large)
+const pool = vec(Particle, { mode: 'soa', capacity: 10_000 })
+
+// Always JS objects (good for small, short-lived collections)
+const scratch = vec(Particle, { mode: 'js' })
+```
+
+### 5. Column access for hot loops
 
 For maximum throughput in tight inner loops, bypass the handle entirely and work with raw TypedArray columns:
 
@@ -126,6 +169,8 @@ for (let i = 0; i < particles.len; i++) {
 Zero handle overhead. Pure `Float64Array[i]` — the JIT compiles this to a single indexed memory load. On 100k entities, column access runs **2.7x faster than equivalent plain JS** code.
 
 The column reference is resolved once (allocation-free on every call — the view is pre-built at slab creation) and the hot loop touches nothing but the two Float64Arrays. This is the "maximum speed" tier.
+
+Column access works on both `slab` and `vec` (when in SoA mode).
 
 ---
 
@@ -217,7 +262,7 @@ That's ~272x fewer objects. The GC has almost nothing to scan. When it does wake
 
 ### Blueprint vs container
 
-`struct()` is a **blueprint**. It computes field offsets and sizes but allocates no memory. `slab()` is a **container**. It owns an `ArrayBuffer` and hands out handles that read and write slots inside that buffer. The same blueprint can back multiple containers.
+`struct()` is a **blueprint**. It computes field offsets and sizes but allocates no memory. `slab()` and `vec()` are **containers**. They own storage and hand out handles that read and write slots inside that storage. The same blueprint can back multiple containers. A slab has fixed capacity; a vec grows as you push.
 
 ### Shared handles, not per-item objects
 
@@ -231,12 +276,12 @@ A slot is an integer index in `[0, capacity)`. It names a fixed location in the 
 
 ## Examples
 
-Two runnable examples live in `examples/`:
+Runnable examples live in `examples/`:
 
 - [`examples/particles.ts`](examples/particles.ts) — end-to-end particle simulation with deterministic LCG, tick integration, and a slab consistency check. Run with `bun run examples/particles.ts`.
-- [`examples/basic.ts`](examples/basic.ts) — minimal struct + slab sketch.
+- [`examples/vec-demo.ts`](examples/vec-demo.ts) — full vec walkthrough: push, field access, for..of iteration, swapRemove, remove, column access, and drop. Run with `bun run examples/vec-demo.ts`.
 
-The particle example is the best single file to read next. It demonstrates every invariant in use.
+The particle example is the best single file to read for slab. The vec-demo covers the growable container API.
 
 ---
 
@@ -303,10 +348,14 @@ Rough status at the time of writing. Anything unchecked is subject to redesign.
 - [x] Handle reuse invariant and `handle.slot` getter
 - [x] SoA layout rewrite — single-buffer Structure-of-Arrays with monomorphic TypedArray codegen
 - [x] `slab.column(name)` — typed column access for maximum throughput in hot loops
+- [x] `slab.forEach(cb)` — counted iteration over occupied slots
 - [x] Benchmark harness with CPU, JIT counter, and heap time-series instrumentation
+- [x] `vec()` — growable, ordered container with push, pop, get, swapRemove, remove, clear, drop
+- [x] `vec` column access, forEach, for..of iteration, reserve
+- [x] Hybrid vec — starts as plain JS objects, auto-graduates to SoA at len=128
+- [x] `VecOptions` API — explicit mode control (`'soa'`, `'js'`, or hybrid default)
 - [ ] `slab.iter()` — lazy iteration with borrow protection
 - [ ] `slab.insert({...})` — atomic object-literal insertion with validation
-- [ ] `vec()` — growable, ordered container
 - [ ] `bump()` — arena allocator for transient work
 - [ ] Strings — length-prefixed, interned, or inline — design pending
 - [ ] npm publication and semver commitment
