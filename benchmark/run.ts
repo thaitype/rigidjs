@@ -38,11 +38,19 @@ function maxOf(values: number[]): number {
   return values.reduce((acc, v) => Math.max(acc, v), -Infinity)
 }
 
+function stddev(values: number[]): number {
+  if (values.length === 0) return 0
+  const mean = values.reduce((a, b) => a + b, 0) / values.length
+  const squaredDiffs = values.map(v => (v - mean) ** 2)
+  return Math.sqrt(squaredDiffs.reduce((a, b) => a + b, 0) / values.length)
+}
+
 interface OneshotMultiStats {
   name: string
   medianOpsPerSec: number
   minOpsPerSec: number
   maxOpsPerSec: number
+  stddevOpsPerSec: number
   runs: number
   rawRuns: BenchResult[]
 }
@@ -53,9 +61,11 @@ interface SustainedMultiStats {
   medianTicks: number
   minTicks: number
   maxTicks: number
+  stddevTicks: number
   medianP99Ms: number
   minP99Ms: number
   maxP99Ms: number
+  stddevP99Ms: number
   runs: number
   rawRuns: SustainedResult[]
 }
@@ -78,6 +88,7 @@ function aggregateOneshotRuns(allRuns: BenchResult[][]): OneshotMultiStats[] {
       medianOpsPerSec: Math.round(median(ops)),
       minOpsPerSec: minOf(ops),
       maxOpsPerSec: maxOf(ops),
+      stddevOpsPerSec: Math.round(stddev(ops)),
       runs: results.length,
       rawRuns: results,
     })
@@ -103,9 +114,11 @@ function aggregateSustainedRuns(allRuns: SustainedResult[][]): SustainedMultiSta
       medianTicks: Math.round(median(ticks)),
       minTicks: minOf(ticks),
       maxTicks: maxOf(ticks),
+      stddevTicks: Math.round(stddev(ticks)),
       medianP99Ms: +median(p99s).toFixed(3),
       minP99Ms: minOf(p99s),
       maxP99Ms: maxOf(p99s),
+      stddevP99Ms: +stddev(p99s).toFixed(3),
       runs: results.length,
       rawRuns: results,
     })
@@ -118,6 +131,7 @@ function formatMultiOneshotTable(stats: OneshotMultiStats[]): string {
   const COL_MEDIAN = 14
   const COL_MIN = 12
   const COL_MAX = 12
+  const COL_STDDEV = 12
   const COL_RUNS = 6
 
   function pad(s: string, n: number, right = false): string {
@@ -129,6 +143,7 @@ function formatMultiOneshotTable(stats: OneshotMultiStats[]): string {
     pad('median ops/s', COL_MEDIAN, true),
     pad('min ops/s', COL_MIN, true),
     pad('max ops/s', COL_MAX, true),
+    pad('stddev', COL_STDDEV, true),
     pad('runs', COL_RUNS, true),
   ].join('  ')
 
@@ -140,6 +155,7 @@ function formatMultiOneshotTable(stats: OneshotMultiStats[]): string {
       pad(s.medianOpsPerSec.toLocaleString(), COL_MEDIAN, true),
       pad(s.minOpsPerSec.toLocaleString(), COL_MIN, true),
       pad(s.maxOpsPerSec.toLocaleString(), COL_MAX, true),
+      pad(s.stddevOpsPerSec.toLocaleString(), COL_STDDEV, true),
       pad(String(s.runs), COL_RUNS, true),
     ].join('  '),
   )
@@ -152,7 +168,9 @@ function formatMultiSustainedTable(stats: SustainedMultiStats[]): string {
   const COL_MED_TICKS = 14
   const COL_MIN_TICKS = 12
   const COL_MAX_TICKS = 12
+  const COL_STDDEV_TICKS = 14
   const COL_MED_P99 = 12
+  const COL_STDDEV_P99 = 12
   const COL_RUNS = 6
 
   function pad(s: string, n: number, right = false): string {
@@ -164,7 +182,9 @@ function formatMultiSustainedTable(stats: SustainedMultiStats[]): string {
     pad('median ticks', COL_MED_TICKS, true),
     pad('min ticks', COL_MIN_TICKS, true),
     pad('max ticks', COL_MAX_TICKS, true),
+    pad('stddev ticks', COL_STDDEV_TICKS, true),
     pad('med p99ms', COL_MED_P99, true),
+    pad('stddev p99ms', COL_STDDEV_P99, true),
     pad('runs', COL_RUNS, true),
   ].join('  ')
 
@@ -176,7 +196,9 @@ function formatMultiSustainedTable(stats: SustainedMultiStats[]): string {
       pad(s.medianTicks.toLocaleString(), COL_MED_TICKS, true),
       pad(s.minTicks.toLocaleString(), COL_MIN_TICKS, true),
       pad(s.maxTicks.toLocaleString(), COL_MAX_TICKS, true),
+      pad(s.stddevTicks.toLocaleString(), COL_STDDEV_TICKS, true),
       pad(s.medianP99Ms.toFixed(3), COL_MED_P99, true),
+      pad(s.stddevP99Ms.toFixed(3), COL_STDDEV_P99, true),
       pad(String(s.runs), COL_RUNS, true),
     ].join('  '),
   )
