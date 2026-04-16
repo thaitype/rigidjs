@@ -18,21 +18,197 @@ import { formatTable, formatSustainedTable, jitCountersAvailable } from './harne
 import type { BenchResult, SustainedResult } from './harness.js'
 
 // ---------------------------------------------------------------------------
-// CLI parsing — only -s <name> is supported
+// Multi-run statistics helpers
 // ---------------------------------------------------------------------------
 
-function parseCli(argv: string[]): { singleScenario: string | null } {
+function median(values: number[]): number {
+  if (values.length === 0) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1]! + sorted[mid]!) / 2
+    : sorted[mid]!
+}
+
+function minOf(values: number[]): number {
+  return values.reduce((acc, v) => Math.min(acc, v), Infinity)
+}
+
+function maxOf(values: number[]): number {
+  return values.reduce((acc, v) => Math.max(acc, v), -Infinity)
+}
+
+interface OneshotMultiStats {
+  name: string
+  medianOpsPerSec: number
+  minOpsPerSec: number
+  maxOpsPerSec: number
+  runs: number
+  rawRuns: BenchResult[]
+}
+
+interface SustainedMultiStats {
+  name: string
+  capacity?: number
+  medianTicks: number
+  minTicks: number
+  maxTicks: number
+  medianP99Ms: number
+  minP99Ms: number
+  maxP99Ms: number
+  runs: number
+  rawRuns: SustainedResult[]
+}
+
+function aggregateOneshotRuns(allRuns: BenchResult[][]): OneshotMultiStats[] {
+  // allRuns[runIndex] = BenchResult[] for one run
+  // Pivot to per-name arrays
+  const byName = new Map<string, BenchResult[]>()
+  for (const runResults of allRuns) {
+    for (const r of runResults) {
+      if (!byName.has(r.name)) byName.set(r.name, [])
+      byName.get(r.name)!.push(r)
+    }
+  }
+  const stats: OneshotMultiStats[] = []
+  for (const [name, results] of byName) {
+    const ops = results.map((r) => r.opsPerSec)
+    stats.push({
+      name,
+      medianOpsPerSec: Math.round(median(ops)),
+      minOpsPerSec: minOf(ops),
+      maxOpsPerSec: maxOf(ops),
+      runs: results.length,
+      rawRuns: results,
+    })
+  }
+  return stats
+}
+
+function aggregateSustainedRuns(allRuns: SustainedResult[][]): SustainedMultiStats[] {
+  const byName = new Map<string, SustainedResult[]>()
+  for (const runResults of allRuns) {
+    for (const r of runResults) {
+      if (!byName.has(r.name)) byName.set(r.name, [])
+      byName.get(r.name)!.push(r)
+    }
+  }
+  const stats: SustainedMultiStats[] = []
+  for (const [name, results] of byName) {
+    const ticks = results.map((r) => r.ticksCompleted)
+    const p99s = results.map((r) => r.p99TickMs)
+    stats.push({
+      name,
+      capacity: results[0]?.capacity,
+      medianTicks: Math.round(median(ticks)),
+      minTicks: minOf(ticks),
+      maxTicks: maxOf(ticks),
+      medianP99Ms: +median(p99s).toFixed(3),
+      minP99Ms: minOf(p99s),
+      maxP99Ms: maxOf(p99s),
+      runs: results.length,
+      rawRuns: results,
+    })
+  }
+  return stats
+}
+
+function formatMultiOneshotTable(stats: OneshotMultiStats[]): string {
+  const COL_NAME = 36
+  const COL_MEDIAN = 14
+  const COL_MIN = 12
+  const COL_MAX = 12
+  const COL_RUNS = 6
+
+  function pad(s: string, n: number, right = false): string {
+    return right ? s.padStart(n) : s.padEnd(n)
+  }
+
+  const header = [
+    pad('name', COL_NAME),
+    pad('median ops/s', COL_MEDIAN, true),
+    pad('min ops/s', COL_MIN, true),
+    pad('max ops/s', COL_MAX, true),
+    pad('runs', COL_RUNS, true),
+  ].join('  ')
+
+  const sep = '-'.repeat(header.length)
+
+  const rows = stats.map((s) =>
+    [
+      pad(s.name, COL_NAME),
+      pad(s.medianOpsPerSec.toLocaleString(), COL_MEDIAN, true),
+      pad(s.minOpsPerSec.toLocaleString(), COL_MIN, true),
+      pad(s.maxOpsPerSec.toLocaleString(), COL_MAX, true),
+      pad(String(s.runs), COL_RUNS, true),
+    ].join('  '),
+  )
+
+  return [header, sep, ...rows].join('\n')
+}
+
+function formatMultiSustainedTable(stats: SustainedMultiStats[]): string {
+  const COL_NAME = 36
+  const COL_MED_TICKS = 14
+  const COL_MIN_TICKS = 12
+  const COL_MAX_TICKS = 12
+  const COL_MED_P99 = 12
+  const COL_RUNS = 6
+
+  function pad(s: string, n: number, right = false): string {
+    return right ? s.padStart(n) : s.padEnd(n)
+  }
+
+  const header = [
+    pad('name', COL_NAME),
+    pad('median ticks', COL_MED_TICKS, true),
+    pad('min ticks', COL_MIN_TICKS, true),
+    pad('max ticks', COL_MAX_TICKS, true),
+    pad('med p99ms', COL_MED_P99, true),
+    pad('runs', COL_RUNS, true),
+  ].join('  ')
+
+  const sep = '-'.repeat(header.length)
+
+  const rows = stats.map((s) =>
+    [
+      pad(s.name, COL_NAME),
+      pad(s.medianTicks.toLocaleString(), COL_MED_TICKS, true),
+      pad(s.minTicks.toLocaleString(), COL_MIN_TICKS, true),
+      pad(s.maxTicks.toLocaleString(), COL_MAX_TICKS, true),
+      pad(s.medianP99Ms.toFixed(3), COL_MED_P99, true),
+      pad(String(s.runs), COL_RUNS, true),
+    ].join('  '),
+  )
+
+  return [header, sep, ...rows].join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// CLI parsing — supports -s <name> and -n <count>
+// ---------------------------------------------------------------------------
+
+function parseCli(argv: string[]): { singleScenario: string | null; runs: number } {
   let singleScenario: string | null = null
+  let runs = 1
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '-s' && i + 1 < argv.length) {
       singleScenario = argv[i + 1]!
       i++
+    } else if (argv[i] === '-n' && i + 1 < argv.length) {
+      const n = parseInt(argv[i + 1]!, 10)
+      if (isNaN(n) || n < 1) {
+        console.error(`Invalid -n value: "${argv[i + 1]}". Must be a positive integer.`)
+        process.exit(1)
+      }
+      runs = n
+      i++
     }
   }
-  return { singleScenario }
+  return { singleScenario, runs }
 }
 
-const { singleScenario } = parseCli(process.argv.slice(2))
+const { singleScenario, runs } = parseCli(process.argv.slice(2))
 
 // ---------------------------------------------------------------------------
 // Scenario registry
@@ -101,6 +277,8 @@ if (selectedScenarios.length === 0) {
   console.error(`No scenario named "${singleScenario}". Available: ${names}`)
   process.exit(1)
 }
+
+const multiRun = runs > 1
 
 // ---------------------------------------------------------------------------
 // Subprocess spawner
@@ -203,62 +381,135 @@ async function writeReportSplit(dir: string, payload: object, timeseries: object
 // Main run loop
 // ---------------------------------------------------------------------------
 
-console.log(`Running benchmarks${singleScenario ? ` (scenario: ${singleScenario})` : ' (all scenarios)'} — sequential per-process isolation\n`)
+console.log(`Running benchmarks${singleScenario ? ` (scenario: ${singleScenario})` : ' (all scenarios)'}${multiRun ? ` x${runs}` : ''} — sequential per-process isolation\n`)
 
+// Single-run collections (used when runs === 1)
 const oneshotResults: BenchResult[] = []
 const sustainedResults: SustainedResult[] = []
 const scalingB9: { jsResults: SustainedResult[]; rigidResults: SustainedResult[] } = { jsResults: [], rigidResults: [] }
 
-for (const scenario of selectedScenarios) {
-  if (scenario.kind === 'oneshot') {
-    // JS baseline subprocess — runs only scenarios without "RigidJS" in the name
-    const rawJs = await spawnScenario({ file: scenario.file, export: scenario.export, type: 'oneshot', name: scenario.name, variant: 'js' })
-    oneshotResults.push(...asOneshot(rawJs, scenario.name).results)
+// Multi-run collections (used when runs > 1)
+// Each element is the full results array from one run
+const oneshotRunsAccum: BenchResult[][] = []
+const sustainedRunsAccum: SustainedResult[][] = []
+const scalingB9RunsAccum: { jsResults: SustainedResult[]; rigidResults: SustainedResult[] }[] = []
 
-    // RigidJS subprocess — runs only scenarios with "RigidJS" in the name
-    const rawRigid = await spawnScenario({ file: scenario.file, export: scenario.export, type: 'oneshot', name: scenario.name, variant: 'rigid' })
-    oneshotResults.push(...asOneshot(rawRigid, scenario.name).results)
+for (let runIdx = 0; runIdx < runs; runIdx++) {
+  if (multiRun) {
+    console.log(`\n--- Run ${runIdx + 1}/${runs} ---`)
+  }
 
-  } else if (scenario.kind === 'sustained') {
-    // JS baseline subprocess
-    const rawJs = await spawnScenario({ file: scenario.file, export: scenario.export, type: 'sustained', name: scenario.name, variant: 'js' })
-    sustainedResults.push(...asSustained(rawJs, scenario.name).results)
+  const runOneshotResults: BenchResult[] = []
+  const runSustainedResults: SustainedResult[] = []
+  const runScalingB9: { jsResults: SustainedResult[]; rigidResults: SustainedResult[] } = { jsResults: [], rigidResults: [] }
 
-    // RigidJS subprocess
-    const rawRigid = await spawnScenario({ file: scenario.file, export: scenario.export, type: 'sustained', name: scenario.name, variant: 'rigid' })
-    sustainedResults.push(...asSustained(rawRigid, scenario.name).results)
+  for (const scenario of selectedScenarios) {
+    if (scenario.kind === 'oneshot') {
+      // JS baseline subprocess — runs only scenarios without "RigidJS" in the name
+      const rawJs = await spawnScenario({ file: scenario.file, export: scenario.export, type: 'oneshot', name: scenario.name, variant: 'js' })
+      runOneshotResults.push(...asOneshot(rawJs, scenario.name).results)
 
+      // RigidJS subprocess — runs only scenarios with "RigidJS" in the name
+      const rawRigid = await spawnScenario({ file: scenario.file, export: scenario.export, type: 'oneshot', name: scenario.name, variant: 'rigid' })
+      runOneshotResults.push(...asOneshot(rawRigid, scenario.name).results)
+
+    } else if (scenario.kind === 'sustained') {
+      // JS baseline subprocess
+      const rawJs = await spawnScenario({ file: scenario.file, export: scenario.export, type: 'sustained', name: scenario.name, variant: 'js' })
+      runSustainedResults.push(...asSustained(rawJs, scenario.name).results)
+
+      // RigidJS subprocess
+      const rawRigid = await spawnScenario({ file: scenario.file, export: scenario.export, type: 'sustained', name: scenario.name, variant: 'rigid' })
+      runSustainedResults.push(...asSustained(rawRigid, scenario.name).results)
+
+    } else {
+      // scaling: JS baseline subprocess then RigidJS subprocess
+      const rawJs = await spawnScenario({ file: scenario.file, type: 'scaling', name: scenario.name, variant: 'js' })
+      const { b9JsResults } = asScaling(rawJs, scenario.name)
+      runScalingB9.jsResults.push(...b9JsResults)
+
+      const rawRigid = await spawnScenario({ file: scenario.file, type: 'scaling', name: scenario.name, variant: 'rigid' })
+      const { b9RigidResults } = asScaling(rawRigid, scenario.name)
+      runScalingB9.rigidResults.push(...b9RigidResults)
+    }
+  }
+
+  if (multiRun) {
+    oneshotRunsAccum.push(runOneshotResults)
+    sustainedRunsAccum.push(runSustainedResults)
+    scalingB9RunsAccum.push(runScalingB9)
   } else {
-    // scaling: JS baseline subprocess then RigidJS subprocess
-    const rawJs = await spawnScenario({ file: scenario.file, type: 'scaling', name: scenario.name, variant: 'js' })
-    const { b9JsResults } = asScaling(rawJs, scenario.name)
-    scalingB9.jsResults.push(...b9JsResults)
-
-    const rawRigid = await spawnScenario({ file: scenario.file, type: 'scaling', name: scenario.name, variant: 'rigid' })
-    const { b9RigidResults } = asScaling(rawRigid, scenario.name)
-    scalingB9.rigidResults.push(...b9RigidResults)
+    oneshotResults.push(...runOneshotResults)
+    sustainedResults.push(...runSustainedResults)
+    scalingB9.jsResults.push(...runScalingB9.jsResults)
+    scalingB9.rigidResults.push(...runScalingB9.rigidResults)
   }
 }
 
-// Interleave B9 JS/RigidJS results by index for table display
+// For multi-run: collapse all run accumulators into flat arrays used by report
+const allOneshotForReport: BenchResult[] = multiRun
+  ? oneshotRunsAccum.flat()
+  : oneshotResults
+const allSustainedForReport: SustainedResult[] = multiRun
+  ? sustainedRunsAccum.flat()
+  : sustainedResults
+const allScalingB9ForReport = multiRun
+  ? scalingB9RunsAccum.reduce(
+      (acc, r) => {
+        acc.jsResults.push(...r.jsResults)
+        acc.rigidResults.push(...r.rigidResults)
+        return acc
+      },
+      { jsResults: [] as SustainedResult[], rigidResults: [] as SustainedResult[] },
+    )
+  : scalingB9
+
+// Interleave B9 JS/RigidJS results by index for table display (single-run)
 const b9Interleaved: SustainedResult[] = []
-for (let i = 0; i < scalingB9.jsResults.length; i++) {
-  b9Interleaved.push(scalingB9.jsResults[i]!)
-  if (scalingB9.rigidResults[i]) b9Interleaved.push(scalingB9.rigidResults[i]!)
+const b9Source = multiRun ? allScalingB9ForReport : scalingB9
+for (let i = 0; i < b9Source.jsResults.length; i++) {
+  b9Interleaved.push(b9Source.jsResults[i]!)
+  if (b9Source.rigidResults[i]) b9Interleaved.push(b9Source.rigidResults[i]!)
 }
 
 // ---------------------------------------------------------------------------
 // Print results
 // ---------------------------------------------------------------------------
 
-if (oneshotResults.length > 0) {
-  console.log('\n--- One-shot scenarios ---\n')
-  console.log(formatTable(oneshotResults))
-}
+if (multiRun) {
+  // Multi-run: aggregate and show median/min/max tables
+  const oneshotStats = aggregateOneshotRuns(oneshotRunsAccum)
+  if (oneshotStats.length > 0) {
+    console.log('\n--- One-shot scenarios (multi-run summary) ---\n')
+    console.log(formatMultiOneshotTable(oneshotStats))
+  }
 
-if (sustainedResults.length > 0 || b9Interleaved.length > 0) {
-  console.log('\n--- Sustained / scaling scenarios ---\n')
-  console.log(formatSustainedTable([...sustainedResults, ...b9Interleaved]))
+  // Sustained multi-run: combine all sustained + scaling into one aggregation
+  const allSustainedRuns: SustainedResult[][] = []
+  for (let i = 0; i < runs; i++) {
+    const sustained = sustainedRunsAccum[i] ?? []
+    const runScaling = scalingB9RunsAccum[i]
+    const scalingAll: SustainedResult[] = runScaling
+      ? [...runScaling.jsResults, ...runScaling.rigidResults]
+      : []
+    allSustainedRuns.push([...sustained, ...scalingAll])
+  }
+  const sustainedStats = aggregateSustainedRuns(allSustainedRuns)
+  if (sustainedStats.length > 0) {
+    console.log('\n--- Sustained / scaling scenarios (multi-run summary) ---\n')
+    console.log(formatMultiSustainedTable(sustainedStats))
+  }
+} else {
+  // Single-run: original output format
+  if (oneshotResults.length > 0) {
+    console.log('\n--- One-shot scenarios ---\n')
+    console.log(formatTable(oneshotResults))
+  }
+
+  if (sustainedResults.length > 0 || b9Interleaved.length > 0) {
+    console.log('\n--- Sustained / scaling scenarios ---\n')
+    console.log(formatSustainedTable([...sustainedResults, ...b9Interleaved]))
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -273,22 +524,61 @@ const meta = {
   xlEnabled: process.env['RIGIDJS_BENCH_XL'] === '1' || process.env['RIGIDJS_BENCH_XL'] === 'true',
   jitCountersAvailable,
   scenario: singleScenario ?? 'all',
+  runs,
 }
 
 const reportDir = '.chief/milestone-5/_report/bench'
 await mkdir(reportDir, { recursive: true })
 
-const b9ScalarsJs = scalingB9.jsResults.map(stripHeapTimeSeries)
-const b9ScalarsRigid = scalingB9.rigidResults.map(stripHeapTimeSeries)
-const b9TimeseriesJs = scalingB9.jsResults.map((r) => ({ name: r.name, heapTimeSeries: r.heapTimeSeries }))
-const b9TimeseriesRigid = scalingB9.rigidResults.map((r) => ({ name: r.name, heapTimeSeries: r.heapTimeSeries }))
-const b8Scalars = sustainedResults.map(stripHeapTimeSeries)
-const b8Timeseries = sustainedResults.map((r) => ({ name: r.name, heapTimeSeries: r.heapTimeSeries }))
+const b9ScalarsJs = allScalingB9ForReport.jsResults.map(stripHeapTimeSeries)
+const b9ScalarsRigid = allScalingB9ForReport.rigidResults.map(stripHeapTimeSeries)
+const b9TimeseriesJs = allScalingB9ForReport.jsResults.map((r) => ({ name: r.name, heapTimeSeries: r.heapTimeSeries }))
+const b9TimeseriesRigid = allScalingB9ForReport.rigidResults.map((r) => ({ name: r.name, heapTimeSeries: r.heapTimeSeries }))
+const b8Scalars = allSustainedForReport.map(stripHeapTimeSeries)
+const b8Timeseries = allSustainedForReport.map((r) => ({ name: r.name, heapTimeSeries: r.heapTimeSeries }))
 
-const payload = {
-  meta,
-  oneShot: oneshotResults,
-  sustained: { b8: b8Scalars, b9Js: b9ScalarsJs, b9Rigid: b9ScalarsRigid },
+let payload: object
+
+if (multiRun) {
+  // Multi-run: store aggregated stats + raw runs
+  const oneshotStats = aggregateOneshotRuns(oneshotRunsAccum)
+  const allSustainedRunsForReport: SustainedResult[][] = []
+  for (let i = 0; i < runs; i++) {
+    const sustained = sustainedRunsAccum[i] ?? []
+    const runScaling = scalingB9RunsAccum[i]
+    const scalingAll: SustainedResult[] = runScaling
+      ? [...runScaling.jsResults, ...runScaling.rigidResults]
+      : []
+    allSustainedRunsForReport.push([...sustained, ...scalingAll])
+  }
+  const sustainedStats = aggregateSustainedRuns(allSustainedRunsForReport)
+
+  const oneshotStatsForReport = oneshotStats.map(({ rawRuns, ...rest }) => ({
+    ...rest,
+    rawRuns,
+  }))
+
+  const sustainedStatsForReport = sustainedStats.map(({ rawRuns, ...rest }) => ({
+    ...rest,
+    rawRuns: rawRuns.map(stripHeapTimeSeries),
+  }))
+
+  payload = {
+    meta,
+    oneShot: oneshotStatsForReport,
+    sustained: {
+      b8: b8Scalars,
+      b9Js: b9ScalarsJs,
+      b9Rigid: b9ScalarsRigid,
+      sustainedStats: sustainedStatsForReport,
+    },
+  }
+} else {
+  payload = {
+    meta,
+    oneShot: allOneshotForReport,
+    sustained: { b8: b8Scalars, b9Js: b9ScalarsJs, b9Rigid: b9ScalarsRigid },
+  }
 }
 
 const timeseries = {
