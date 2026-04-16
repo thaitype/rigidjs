@@ -1,22 +1,22 @@
 # R&D Performance Improvement Suggestions
 
-**Source:** M7 final analysis (revised with stable median-of-5 benchmark data)
+**Source:** M7 final analysis (revised with stable n=20 median benchmark data including stddev)
 **Date:** 2026-04-12
 **Purpose:** Guide next milestone planning for closing remaining performance gaps
 
 ---
 
-## 1. N=10 Creation Gap (0.56x)
+## 1. N=10 Creation Gap (0.55x)
 
 ### Root Cause
 
 VecImpl constructor property initialization costs more than `new Array(10) + 10x {}`. The class refactor eliminated `defineProperty` overhead but VecImpl still initializes ~15 instance properties per construction. At N=10, construction is the dominant cost -- the 10 push calls are cheap but the VecImpl setup is not.
 
-Stable data: JS median 863k ops/s, hybrid median 482k ops/s = **0.56x**.
+Stable data (n=20): JS median 826k ops/s (48% stddev), hybrid median 453k ops/s (28% stddev) = **0.55x**. The hybrid side is reasonably consistent (28% stddev) -- the gap is real and driven by constructor overhead, not noise.
 
 ### Approaches to Investigate
 
-**A. Lazy property initialization.** Defer initialization of SoA-related properties (`_columns`, `_columnLayout`, `_soaHandle`, graduation state) until graduation actually occurs. In JS mode, these are never read. This could cut constructor cost by 30-40% (5-6 fewer property assignments). Expected: push N=10 from 0.56x toward 0.7x.
+**A. Lazy property initialization.** Defer initialization of SoA-related properties (`_columns`, `_columnLayout`, `_soaHandle`, graduation state) until graduation actually occurs. In JS mode, these are never read. This could cut constructor cost by 30-40% (5-6 fewer property assignments). Expected: push N=10 from 0.55x toward 0.7x.
 
 **B. VecImpl instance pooling.** Maintain a free-list of dropped VecImpl instances. When `vec(def)` is called, recycle a pooled instance instead of constructing a new one. `drop()` returns the instance to the pool. This eliminates constructor cost entirely for repeated create/drop cycles (common in benchmarks, less common in real code).
 
@@ -30,7 +30,7 @@ Start with (A) lazy initialization -- lowest-risk change with the most direct im
 
 ---
 
-## 2. N=1000 Graduation Cost (0.10x creation, 0.55x churn)
+## 2. N=1000 Graduation Cost (0.10x creation, 0.59x churn)
 
 ### Root Cause
 
@@ -46,7 +46,7 @@ Steps 1-3 are O(N) and unavoidable. Step 4 is the largest fixed cost.
 
 **Important context:** In real usage, graduation happens once per vec lifetime. The N=1000 benchmark is worst-case by design -- fresh vec + full push cycle each iteration. This makes it a benchmark artifact, not a representative real-world scenario. Still worth optimizing since the benchmark is a valid stress test.
 
-Stable data: JS median 59k ops/s, hybrid median 5.6k ops/s = **0.10x** (creation); JS median 63k, hybrid median 35k = **0.55x** (churn).
+Stable data (n=20): JS median 58k ops/s (31% stddev), hybrid median 5.5k ops/s (7% stddev) = **0.10x** (creation); JS median 56k (46% stddev), hybrid median 33k (32% stddev) = **0.59x** (churn). The creation ratio is highly stable (7% hybrid stddev) -- this is a reliable measurement of graduation cost.
 
 ### Approaches to Investigate
 
@@ -64,18 +64,22 @@ Start with (A) -- cache SoA handle class on StructDef. This directly addresses t
 
 ---
 
-## 3. N=100 Is the Sweet Spot -- Validates the Hybrid Approach
+## 3. N=100 -- Promising but High Variance
 
-Stable data confirms N=100 is where the hybrid vec already wins:
+n=20 data shows N=100 is improved but results require careful interpretation:
 
-| Operation | JS median | Hybrid median | Ratio |
-|---|---|---|---|
-| Creation | 382k | 308k | **0.81x** -- close to parity |
-| Churn | 204k | 536k | **2.63x** -- already winning |
+| Operation | JS median | Hybrid median | Ratio | JS stddev | Hybrid stddev |
+|---|---|---|---|---|---|
+| Creation | 435k | 296k | **0.68x** | 136k (31%) | 85k (29%) |
+| Churn | 226k | 335k | **1.48x** | 55k (24%) | 183k (55%) |
 
-At N=100, the VecImpl constructor cost is amortized across enough elements to become negligible, JS mode push is fast (plain object creation), and no graduation occurs (threshold is 128). The 2.63x churn win at N=100 demonstrates that the hybrid vec's steady-state push/pop performance is genuinely superior to JS once constructor overhead is amortized.
+At N=100, the VecImpl constructor cost is amortized across enough elements to become less dominant, JS mode push is fast (plain object creation), and no graduation occurs (threshold is 128).
 
-This validates the hybrid architecture. The remaining work is pushing the crossover point lower (from ~N=50 down to ~N=10).
+**Creation (0.68x):** Below parity but a massive improvement from 0.07x SoA-only. The 29% stddev means this is a moderately reliable measurement. The gap is real -- constructor overhead is still significant relative to 100 object literals.
+
+**Churn (1.48x):** The median suggests hybrid vec is faster for steady-state push/pop, but the 55% stddev on the hybrid side is very high. The true ratio could plausibly be anywhere from 0.8x to 2x. Additionally, the JS baseline swap-remove is not identical to vec's `swapRemove`, which introduces a fairness question. This result is encouraging but not conclusive.
+
+This partially validates the hybrid architecture. Creation is closing the gap but hasn't reached parity. Churn likely wins but needs benchmark fairness fixes and more stable measurements before claiming a definitive advantage. The remaining work is both pushing the crossover point lower and validating the churn advantage with fair benchmarks.
 
 ---
 
@@ -149,12 +153,13 @@ This is a significant R&D effort. The key challenge is generating a fused loop b
 
 ## 7. Priority Ranking
 
-| Priority | Item | Expected Impact | Effort |
-|----------|------|-----------------|--------|
-| 1 | Cache SoA codegen on StructDef | Fixes N=1000 graduation cost, improves SoA creation | Small |
-| 2 | Lazy VecImpl property init | Improves N=10 creation from 0.56x toward 0.7x | Small |
-| 3 | Batch push API | Amortizes per-call overhead at all N | Medium |
-| 4 | Hybrid slab | Closes slab small-N gap | Medium |
-| 5 | .iter() chains | New API surface, large perf opportunity | Large |
-| 6 | Bump allocator | New container type | Medium |
-| 7 | RigidError + mutation guard | Correctness, not performance | Small |
+| Priority | Item | Expected Impact | Confidence | Effort |
+|----------|------|-----------------|------------|--------|
+| 1 | Cache SoA codegen on StructDef | Fixes N=1000 graduation cost (0.10x, 7% stddev -- reliable) | High | Small |
+| 2 | Fix B2-hybrid benchmark fairness | Validates N=100 churn ratio (currently 1.48x with 55% stddev and different swap-remove) | High | Small |
+| 3 | Lazy VecImpl property init | Improves N=10 creation from 0.55x toward 0.7x (28% stddev -- moderately reliable) | Medium | Small |
+| 4 | Batch push API | Amortizes per-call overhead at all N | -- | Medium |
+| 5 | Hybrid slab | Closes slab small-N gap | -- | Medium |
+| 6 | .iter() chains | New API surface, large perf opportunity | -- | Large |
+| 7 | Bump allocator | New container type | -- | Medium |
+| 8 | RigidError + mutation guard | Correctness, not performance | -- | Small |
