@@ -151,7 +151,55 @@ This is a significant R&D effort. The key challenge is generating a fused loop b
 
 ---
 
-## 7. Priority Ranking
+## 7. Background Growth via SharedArrayBuffer/Worker
+
+### Problem
+
+Vec growth (`push()` overflows capacity) is blocking: allocate new buffer + copy all data. At 100k entities this costs ~180µs — a latency spike the user must wait for.
+
+### Approach
+
+Use a Worker thread to grow in the background before the buffer fills up:
+
+1. When `len >= capacity * 0.75`, send a grow request to a background Worker
+2. Worker allocates a new `SharedArrayBuffer` at 2x capacity and copies data
+3. Main thread keeps pushing to the old buffer (still has 25% headroom)
+4. When Worker finishes, main thread swaps to the new buffer seamlessly
+5. If main thread fills old buffer before Worker finishes → fall back to blocking grow (same as today)
+
+### API
+
+```ts
+vec(Particle, {
+  capacity: 1000,
+  backgroundGrow: true  // default: auto-detect
+})
+```
+
+**Default behavior:** `true` when `SharedArrayBuffer` and `Worker` are available (Bun backend), `false` otherwise. Users can override:
+
+```ts
+const DEFAULT_BG_GROW = typeof SharedArrayBuffer !== 'undefined'
+  && typeof Worker !== 'undefined'
+```
+
+`backgroundGrow: false` gives deterministic single-threaded behavior for environments that need it.
+
+### Challenges
+
+- **Push faster than copy:** If user pushes faster than the Worker can copy, old buffer fills up → must block anyway. Mitigation: trigger at 75% to give headroom.
+- **Worker pool:** Spawning a Worker per grow is expensive. Need a shared Worker pool (one per process) that handles grow requests.
+- **Column view rebuild:** After swap, all TypedArray column views must be rebuilt (same as current grow). Handle re-creation cost applies.
+- **Atomics overhead:** SharedArrayBuffer access may add per-read/write overhead from memory barriers. Needs benchmarking.
+- **Double memory:** During growth, both old and new buffers are alive. Temporary 2x memory usage.
+
+### Priority
+
+R&D exploration — not next milestone. Target M9 or M10 after core features (RigidError, iter chains, bump) are shipped. The flag design allows it to be added without breaking changes.
+
+---
+
+## 8. Priority Ranking
 
 | Priority | Item | Expected Impact | Confidence | Effort |
 |----------|------|-----------------|------------|--------|
@@ -163,3 +211,4 @@ This is a significant R&D effort. The key challenge is generating a fused loop b
 | 6 | .iter() chains | New API surface, large perf opportunity | -- | Large |
 | 7 | Bump allocator | New container type | -- | Medium |
 | 8 | RigidError + mutation guard | Correctness, not performance | -- | Small |
+| 9 | Background grow (SharedArrayBuffer/Worker) | Eliminates grow latency spike for large vecs | -- | Large |
