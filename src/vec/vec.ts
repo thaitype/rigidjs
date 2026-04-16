@@ -264,6 +264,12 @@ type AnyTypedArray =
 // VecImpl class
 // Prototype-defined methods and getters eliminate per-call defineProperty()
 // overhead that the old object-literal approach incurred (~230 ns/call).
+//
+// Method swapping: on construction, hot-path methods (push, get, pop,
+// swapRemove, remove, forEach, [Symbol.iterator]) are bound to either the JS
+// or SoA implementation on the instance. This eliminates the _mode branch on
+// every call — the JIT sees a monomorphic call site for each bound method.
+// On graduation, _swapToSoAMethods() rebinds all methods to SoA variants.
 // ---------------------------------------------------------------------------
 
 class VecImpl<F extends StructFields> implements Vec<F> {
@@ -275,7 +281,7 @@ class VecImpl<F extends StructFields> implements Vec<F> {
 
   // JS mode state
   private _items: object[] | null
-  private _createJSObject: (() => object) | null
+  private _factory: (() => object) | null
 
   // SoA mode state
   private _buf: ArrayBuffer | null
@@ -290,6 +296,18 @@ class VecImpl<F extends StructFields> implements Vec<F> {
   // Layout is shared across instances via def._columnLayout
   private readonly _layout: ReturnType<typeof computeColumnLayout>
   private readonly _def: StructDef<F>
+
+  // Method slots — swapped between JS and SoA implementations on construction
+  // and again on graduation. Declared here so TypeScript knows they are instance
+  // properties (not prototype methods). The actual method bodies live in the
+  // _pushJS / _pushSoA family below.
+  push!: () => Handle<F>
+  pop!: () => void
+  get!: (index: number) => Handle<F>
+  swapRemove!: (index: number) => void
+  remove!: (index: number) => void
+  forEach!: (cb: (handle: Handle<F>, index: number) => void) => void
+  [Symbol.iterator]!: () => Iterator<Handle<F>>
 
   constructor(def: StructDef<F>, opts?: number | VecOptions) {
     // ---------------------------------------------------------------------------
@@ -365,10 +383,10 @@ class VecImpl<F extends StructFields> implements Vec<F> {
         ;(def as any)._JSFactory = generateJSObjectFactory(def.fields)
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
-      this._createJSObject = (def as any)._JSFactory as () => object
+      this._factory = (def as any)._JSFactory as () => object
     } else {
       this._items = null
-      this._createJSObject = null
+      this._factory = null
     }
 
     // ---------------------------------------------------------------------------
@@ -396,6 +414,18 @@ class VecImpl<F extends StructFields> implements Vec<F> {
     } else {
       this._buf = null
       this._capacity = 0
+    }
+
+    // ---------------------------------------------------------------------------
+    // Method swapping: bind the correct implementation to each hot-path slot.
+    // This eliminates the _mode branch in every call — the JIT sees a
+    // monomorphic dispatch after the first few calls instead of a megamorphic
+    // branch every time.
+    // ---------------------------------------------------------------------------
+    if (jsMode) {
+      this._bindJSMethods()
+    } else {
+      this._bindSoAMethods()
     }
   }
 
@@ -554,128 +584,202 @@ class VecImpl<F extends StructFields> implements Vec<F> {
     this._capacity = soaCapacity
     this._mode = 'soa'
     this._items = null
+    this._factory = null
+
+    // Step 8: swap hot-path methods to SoA implementations.
+    this._bindSoAMethods()
   }
 
   // ---------------------------------------------------------------------------
-  // Public methods (on prototype — no per-instance defineProperty() cost)
+  // Method binding helpers — called once per construction/graduation event.
   // ---------------------------------------------------------------------------
 
-  push(): Handle<F> {
+  private _bindJSMethods(): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- method swapping; called as v.push() so `this` is always the instance
+    this.push = this._pushJS as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.pop = this._popJS as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.get = this._getJS as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.swapRemove = this._swapRemoveJS as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.remove = this._removeJS as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.forEach = this._forEachJS as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this[Symbol.iterator] = this._iteratorJS as any
+  }
+
+  private _bindSoAMethods(): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- method swapping; called as v.push() so `this` is always the instance
+    this.push = this._pushSoA as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.pop = this._popSoA as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.get = this._getSoA as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.swapRemove = this._swapRemoveSoA as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.remove = this._removeSoA as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.forEach = this._forEachSoA as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this[Symbol.iterator] = this._iteratorSoA as any
+  }
+
+  // ---------------------------------------------------------------------------
+  // JS mode hot-path methods — zero _mode branch overhead.
+  // Only _pushJS has a graduation check (the only method that increases len).
+  // All other JS methods just perform direct array operations.
+  // ---------------------------------------------------------------------------
+
+  private _pushJS(): Handle<F> {
     this._assertLive()
-    if (this._mode === 'soa') {
-      if (this._len >= this._capacity) {
-        this._grow()
-      }
-      const slot = this._len
-      this._len++
-      // SoA _rebase takes only (slot) — no DataView, no byte offset.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated and not in static TS type
-      ;((this._handle as any)._rebase(slot))
+    const obj = this._factory!()
+    this._items!.push(obj)
+    this._len++
+    // Auto-graduation: when len reaches the threshold, switch to SoA mode.
+    // Only push() increases len, so this is the only place the check belongs.
+    if (this._len >= this._graduateAt) {
+      this._graduateToSoA()
+      // After graduation, _handle is the SoA handle. Rebase to the new slot.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is code-generated
+      ;((this._handle as any)._rebase(this._len - 1))
       return this._handle!
-    } else {
-      // JS mode: create a plain JS object and push into _items.
-      // The plain JS object IS the handle — no wrapper needed.
-      const obj = this._createJSObject!()
-      this._items!.push(obj)
-      this._len++
-      // Auto-graduation: when len reaches the threshold, switch to SoA mode.
-      // The item just pushed is included in _items before graduation runs, so
-      // all data (including this new item) is copied to SoA columns.
-      if (this._len >= this._graduateAt) {
-        this._graduateToSoA()
-        // After graduation, _handle is the SoA handle. Rebase it to the slot
-        // of the item we just pushed.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is code-generated
-        ;((this._handle as any)._rebase(this._len - 1))
-        return this._handle!
-      }
-      return obj as unknown as Handle<F>
+    }
+    return obj as unknown as Handle<F>
+  }
+
+  private _popJS(): void {
+    this._assertLive()
+    if (this._len === 0) throw new Error('vec is empty')
+    this._items!.pop()
+    this._len--
+  }
+
+  private _getJS(index: number): Handle<F> {
+    this._assertLive()
+    if (index < 0 || index >= this._len) throw new Error('index out of range')
+    return this._items![index] as unknown as Handle<F>
+  }
+
+  private _swapRemoveJS(index: number): void {
+    this._assertLive()
+    if (index < 0 || index >= this._len) throw new Error('index out of range')
+    const last = this._len - 1
+    this._items![index] = this._items![last]!
+    this._items!.pop()
+    this._len--
+  }
+
+  private _removeJS(index: number): void {
+    this._assertLive()
+    if (index < 0 || index >= this._len) throw new Error('index out of range')
+    this._items!.splice(index, 1)
+    this._len--
+  }
+
+  private _forEachJS(cb: (handle: Handle<F>, index: number) => void): void {
+    this._assertLive()
+    const items = this._items!
+    for (let i = 0; i < items.length; i++) {
+      cb(items[i] as unknown as Handle<F>, i)
     }
   }
 
-  pop(): void {
-    this._assertLive()
-    if (this._mode === 'soa') {
-      if (this._len === 0) {
-        throw new Error('vec is empty')
-      }
-      this._len--
-    } else {
-      // JS mode
-      if (this._len === 0) {
-        throw new Error('vec is empty')
-      }
-      this._items!.pop()
-      this._len--
+  private _iteratorJS(): Iterator<Handle<F>> {
+    let cursor = 0
+    const self = this
+    return {
+      next(): IteratorResult<Handle<F>> {
+        self._assertLive()
+        if (cursor < self._len) {
+          const obj = self._items![cursor]!
+          cursor++
+          return { value: obj as unknown as Handle<F>, done: false }
+        }
+        return { value: undefined as unknown as Handle<F>, done: true }
+      },
     }
   }
 
-  get(index: number): Handle<F> {
+  // ---------------------------------------------------------------------------
+  // SoA mode hot-path methods.
+  // ---------------------------------------------------------------------------
+
+  private _pushSoA(): Handle<F> {
     this._assertLive()
-    if (this._mode === 'soa') {
-      if (index < 0 || index >= this._len) {
-        throw new Error('index out of range')
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- same bridge as push()
-      ;((this._handle as any)._rebase(index))
-      return this._handle!
-    } else {
-      // JS mode: return the plain JS object directly
-      if (index < 0 || index >= this._len) {
-        throw new Error('index out of range')
-      }
-      return this._items![index] as unknown as Handle<F>
+    if (this._len >= this._capacity) {
+      this._grow()
+    }
+    const slot = this._len
+    this._len++
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated
+    ;((this._handle as any)._rebase(slot))
+    return this._handle!
+  }
+
+  private _popSoA(): void {
+    this._assertLive()
+    if (this._len === 0) throw new Error('vec is empty')
+    this._len--
+  }
+
+  private _getSoA(index: number): Handle<F> {
+    this._assertLive()
+    if (index < 0 || index >= this._len) throw new Error('index out of range')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated
+    ;((this._handle as any)._rebase(index))
+    return this._handle!
+  }
+
+  private _swapRemoveSoA(index: number): void {
+    this._assertLive()
+    if (index < 0 || index >= this._len) throw new Error('index out of range')
+    // _swapFn is a codegen-unrolled function: no column loop at call time.
+    this._swapFn(index, this._len - 1)
+    this._len--
+  }
+
+  private _removeSoA(index: number): void {
+    this._assertLive()
+    if (index < 0 || index >= this._len) throw new Error('index out of range')
+    for (let c = 0; c < this._columnArrays.length; c++) {
+      this._columnArrays[c]!.copyWithin(index, index + 1, this._len)
+    }
+    this._len--
+  }
+
+  private _forEachSoA(cb: (handle: Handle<F>, index: number) => void): void {
+    this._assertLive()
+    for (let i = 0; i < this._len; i++) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated
+      ;((this._handle as any)._rebase(i))
+      cb(this._handle!, i)
     }
   }
 
-  swapRemove(index: number): void {
-    this._assertLive()
-    if (this._mode === 'soa') {
-      if (index < 0 || index >= this._len) {
-        throw new Error('index out of range')
-      }
-      // Copy all column values from last element into index.
-      // When index === _len - 1, this is a self-assignment (harmless).
-      // _swapFn is a codegen-unrolled function (generated via new Function() at
-      // construction/growth time) that writes each column directly without a loop.
-      this._swapFn(index, this._len - 1)
-      this._len--
-    } else {
-      // JS mode
-      if (index < 0 || index >= this._len) {
-        throw new Error('index out of range')
-      }
-      const last = this._len - 1
-      // Move the last item to the removed slot.
-      // When index === last, this is a self-assignment (harmless).
-      this._items![index] = this._items![last]!
-      this._items!.pop()
-      this._len--
+  private _iteratorSoA(): Iterator<Handle<F>> {
+    let cursor = 0
+    const self = this
+    return {
+      next(): IteratorResult<Handle<F>> {
+        self._assertLive()
+        if (cursor < self._len) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated
+          ;((self._handle as any)._rebase(cursor))
+          cursor++
+          return { value: self._handle!, done: false }
+        }
+        return { value: undefined as unknown as Handle<F>, done: true }
+      },
     }
   }
 
-  remove(index: number): void {
-    this._assertLive()
-    if (this._mode === 'soa') {
-      if (index < 0 || index >= this._len) {
-        throw new Error('index out of range')
-      }
-      // Shift all elements after index left by one position.
-      // TypedArray.copyWithin handles overlapping ranges correctly.
-      // Use pre-extracted _columnArrays to avoid Map.get() per column per call.
-      for (let c = 0; c < this._columnArrays.length; c++) {
-        this._columnArrays[c]!.copyWithin(index, index + 1, this._len)
-      }
-      this._len--
-    } else {
-      // JS mode
-      if (index < 0 || index >= this._len) {
-        throw new Error('index out of range')
-      }
-      this._items!.splice(index, 1)
-      this._len--
-    }
-  }
+  // ---------------------------------------------------------------------------
+  // Non-hot-path public methods (on prototype — mode checks are fine here).
+  // ---------------------------------------------------------------------------
 
   get len(): number {
     return this._len
@@ -712,8 +816,6 @@ class VecImpl<F extends StructFields> implements Vec<F> {
   get buffer(): ArrayBuffer {
     this._assertLive()
     if (this._mode === 'js') {
-      // buffer is not available in JS mode — but we keep this guard for
-      // vecs that are permanently in JS mode (mode: 'js' option, task-4).
       throw new Error('buffer not available in JS mode')
     }
     return this._buf!
@@ -723,70 +825,13 @@ class VecImpl<F extends StructFields> implements Vec<F> {
     this._assertLive()
     if (this._mode === 'js') {
       // Auto-graduate: caller clearly wants TypedArray (SoA) data.
-      // This is a one-time cost — subsequent column() calls are free.
       this._graduateToSoA()
     }
     const arr = this._columnMap.get(name)
     if (arr === undefined) {
       throw new Error(`unknown column: ${name}`)
     }
-    // The runtime TypedArray subclass for this column was determined by the column's
-    // numeric token at vec construction time and is guaranteed to match ColumnType<F, K>.
     return arr as unknown as ColumnType<F, K>
-  }
-
-  [Symbol.iterator](): Iterator<Handle<F>> {
-    if (this._mode === 'soa') {
-      // One iterator object allocated per for..of call.
-      // Each next() call rebases the shared handle — zero allocation per step.
-      let cursor = 0
-      const self = this
-      return {
-        next(): IteratorResult<Handle<F>> {
-          self._assertLive()
-          if (cursor < self._len) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is code-generated
-            ;((self._handle as any)._rebase(cursor))
-            cursor++
-            return { value: self._handle!, done: false }
-          }
-          return { value: undefined as unknown as Handle<F>, done: true }
-        },
-      }
-    } else {
-      // JS mode iterator: yield plain JS objects directly
-      let cursor = 0
-      const self = this
-      return {
-        next(): IteratorResult<Handle<F>> {
-          self._assertLive()
-          if (cursor < self._len) {
-            const obj = self._items![cursor]!
-            cursor++
-            return { value: obj as unknown as Handle<F>, done: false }
-          }
-          return { value: undefined as unknown as Handle<F>, done: true }
-        },
-      }
-    }
-  }
-
-  forEach(cb: (handle: Handle<F>, index: number) => void): void {
-    this._assertLive()
-    if (this._mode === 'soa') {
-      // Internal counted loop — no iterator protocol, no per-call allocation.
-      // Reuses the single shared handle instance by rebasing it to each index.
-      for (let i = 0; i < this._len; i++) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- _rebase is generated and not in static TS type
-        ;((this._handle as any)._rebase(i))
-        cb(this._handle!, i)
-      }
-    } else {
-      // JS mode: pass plain JS objects directly — no wrapper needed.
-      for (let i = 0; i < this._len; i++) {
-        cb(this._items![i] as unknown as Handle<F>, i)
-      }
-    }
   }
 
   reserve(n: number): void {
@@ -803,23 +848,13 @@ class VecImpl<F extends StructFields> implements Vec<F> {
 
     // Grow to exactly n.
     const newBuf = new ArrayBuffer(this._layout.sizeofPerSlot * n)
-
-    // Snapshot old columns before rebuilding.
     const oldColumnArrays = this._columnArrays.slice()
-
-    // Build new columns over the new buffer.
     this._buildColumns(newBuf, n)
-
-    // Copy existing data from old columns to new columns.
     for (let c = 0; c < this._columnArrays.length; c++) {
       this._columnArrays[c]!.set(oldColumnArrays[c]!)
     }
-
-    // Update internal state.
     this._buf = newBuf
     this._capacity = n
-
-    // Re-create handle with new column refs (Strategy A) — same as _grow().
     this._HandleClass = generateSoAHandleClass(this._layout.handleTree, this._columnRefs)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this._handle = new (this._HandleClass as any)(0) as Handle<F>
