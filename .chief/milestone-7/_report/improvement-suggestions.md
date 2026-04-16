@@ -155,17 +155,35 @@ This is a significant R&D effort. The key challenge is generating a fused loop b
 
 ### Problem
 
-Vec growth (`push()` overflows capacity) is blocking: allocate new buffer + copy all data. At 100k entities this costs ~180µs — a latency spike the user must wait for.
+Two operations block the main thread with O(N) copies:
+
+1. **Vec grow** (`push()` overflows capacity): allocate new buffer + copy all columns. At 100k entities this costs ~180µs.
+2. **Graduation** (JS mode → SoA): allocate buffer + copy JS objects → TypedArray columns. At N=128 this costs ~67µs, and is more expensive per item than grow because it reads JS object properties.
+
+Both are latency spikes during a `push()` call.
 
 ### Approach
 
-Use a Worker thread to grow in the background before the buffer fills up:
+Use a Worker thread to perform both grow and graduation in the background:
 
+**Background grow:**
 1. When `len >= capacity * 0.75`, send a grow request to a background Worker
 2. Worker allocates a new `SharedArrayBuffer` at 2x capacity and copies data
 3. Main thread keeps pushing to the old buffer (still has 25% headroom)
 4. When Worker finishes, main thread swaps to the new buffer seamlessly
 5. If main thread fills old buffer before Worker finishes → fall back to blocking grow (same as today)
+
+**Background graduation:**
+1. When `len >= graduateAt * 0.75` (e.g. 96 of 128), send graduation request to Worker
+2. Worker allocates `SharedArrayBuffer`, copies JS objects → TypedArray columns
+3. Main thread keeps pushing to `_items` in JS mode (still fast, ~32 pushes of headroom)
+4. When Worker finishes → swap to SoA mode, null out `_items`
+5. If main thread hits `graduateAt` before Worker finishes → fall back to blocking graduation
+
+Background graduation is **even more beneficial** than background grow because:
+- JS object → TypedArray copy is slower per item (property reads vs TypedArray.set)
+- More time to hide in the background
+- After swap, all future operations benefit from SoA speed
 
 ### API
 
