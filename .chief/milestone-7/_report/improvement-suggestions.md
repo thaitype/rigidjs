@@ -77,9 +77,9 @@ At N=100, the VecImpl constructor cost is amortized across enough elements to be
 
 **Creation (0.68x):** Below parity but a massive improvement from 0.07x SoA-only. The 29% stddev means this is a moderately reliable measurement. The gap is real -- constructor overhead is still significant relative to 100 object literals.
 
-**Churn (1.48x):** The median suggests hybrid vec is faster for steady-state push/pop, but the 55% stddev on the hybrid side is very high. The true ratio could plausibly be anywhere from 0.8x to 2x. Additionally, the JS baseline swap-remove is not identical to vec's `swapRemove`, which introduces a fairness question. This result is encouraging but not conclusive.
+**Churn (1.48x):** The median suggests hybrid vec is faster for steady-state push/pop, but the 55% stddev on the hybrid side is very high. The true ratio could plausibly be anywhere from 0.8x to 2x. The benchmark is fair — both sides perform identical swap-remove-from-index-0 operations. The variance is inherent to small-N benchmarking. The honest conclusion is: churn at N=100 is approximately 1x, with too much variance to be precise.
 
-This partially validates the hybrid architecture. Creation is closing the gap but hasn't reached parity. Churn likely wins but needs benchmark fairness fixes and more stable measurements before claiming a definitive advantage. The remaining work is both pushing the crossover point lower and validating the churn advantage with fair benchmarks.
+This partially validates the hybrid architecture. Creation is closing the gap but hasn't reached parity. Churn is approximately at parity. The remaining work is pushing the creation crossover point lower.
 
 ---
 
@@ -156,7 +156,7 @@ This is a significant R&D effort. The key challenge is generating a fused loop b
 | Priority | Item | Expected Impact | Confidence | Effort |
 |----------|------|-----------------|------------|--------|
 | 1 | Cache SoA codegen on StructDef | Fixes N=1000 graduation cost (0.10x, 7% stddev -- reliable) | High | Small |
-| 2 | Fix B2-hybrid benchmark fairness | Validates N=100 churn ratio (currently 1.48x with 55% stddev and different swap-remove) | High | Small |
+| 2 | Reduce small-N benchmark variance | N=100 churn is ~1x but 55% stddev makes it imprecise. Explore longer iteration counts or different measurement approach | Medium | Small |
 | 3 | Lazy VecImpl property init | Improves N=10 creation from 0.55x toward 0.7x (28% stddev -- moderately reliable) | Medium | Small |
 | 4 | Batch push API | Amortizes per-call overhead at all N | -- | Medium |
 | 5 | Hybrid slab | Closes slab small-N gap | -- | Medium |

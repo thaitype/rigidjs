@@ -113,9 +113,9 @@ The 28% hybrid stddev confirms this is a real, measurable gap driven by construc
 
 With n=20 runs, N=100 creation stabilized at 0.68x -- below the 1.20x seen in earlier n=5 runs. The earlier result was likely an outlier benefiting from JIT variance. The 0.68x is a more honest measurement. Constructor overhead is still significant relative to 100 object literals but is amortized enough to close the gap from 0.27x (SoA-only).
 
-### N=100 churn (1.48x, 55% stddev -- unreliable)
+### N=100 churn (1.48x, 55% stddev -- noisy)
 
-The n=20 churn median at N=100 is 1.48x but with 55% stddev on the hybrid side. This is too noisy to claim a definitive advantage. Additionally, the B2-hybrid JS baseline uses a different swap-remove implementation than vec's `swapRemove`, introducing a fairness question. The result is encouraging but needs: (1) more stable measurement methodology, and (2) identical swap-remove logic in both baselines.
+The n=20 churn median at N=100 is 1.48x but with 55% stddev on the hybrid side. The benchmark is fair — both sides perform identical swap-remove-from-index-0 operations. The variance is inherent to small-N benchmarking. The honest conclusion: churn at N=100 is approximately 1x, with too much variance to be precise.
 
 ### N=1000 graduation cost (0.10x creation, 0.59x churn)
 

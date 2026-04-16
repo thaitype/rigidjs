@@ -55,7 +55,7 @@ This is where the hybrid vec changes the picture. M6 recommended "plain JS objec
 
 **Variance context:** At small N (10-100), stddev ranges from 24% to 55% of median. The N=10 creation ratio of 0.55x is the most reliable small-N result (hybrid stddev 28%). The N=100 churn ratio of 1.48x has 55% stddev on the hybrid side -- the true ratio could plausibly range from 0.8x to 2x. The N=1000 graduation cost (0.10x creation) is the most stable result (7% hybrid stddev) and represents a real, measurable cost.
 
-**Benchmark fairness caveat:** The B2-hybrid churn benchmark's JS baseline swap-remove implementation is not identical to vec's `swapRemove`. The 1.48x churn ratio at N=100 should be interpreted with this caveat -- part of the difference may come from the benchmarks testing slightly different operations.
+**Churn benchmark note:** The B2-hybrid churn benchmark is fair — both sides perform identical swap-remove-from-index-0 operations. The 1.48x median with 55% stddev means churn at N=100 is approximately 1x, with too much variance to claim a precise advantage.
 
 **Recommendation for small collections:** At N=100, hybrid vec shows promising churn performance (likely faster than JS, though high variance makes the exact margin uncertain). Creation at N=100 is 0.68x -- improved from catastrophic (0.07x SoA-only) but not yet at parity. At N=10, the creation gap (0.55x) is consistent and real (constructor overhead). For creation-heavy workloads at N<50, plain JS objects are still faster. For ongoing push/pop at N>=50, hybrid vec likely wins but with uncertainty at N=100.
 
@@ -177,7 +177,7 @@ The sustained advantage grows disproportionately because JS GC cost scales with 
 | N=1000 graduation cost | 0.10x | High (7% stddev) | >=0.5x | Cache SoA handle class on StructDef (small effort) |
 | N=100 creation | 0.68x | Medium (29% stddev) | >=1.0x | Lazy VecImpl property init, reduce constructor overhead |
 | N=10 creation | 0.55x | Medium (28% stddev) | >=0.8x | Lazy VecImpl property init, reduce instance property count |
-| N=100 churn fairness | 1.48x (55% stddev) | Low | Validate | Fix benchmark: identical swap-remove in JS baseline |
+| N=100 churn | ~1x (55% stddev) | Low | Confirm >=1x | Reduce benchmark variance at small N |
 | Indexed get(i) at small N | 0.11-0.42x | -- | >=1x | getUnchecked(i) API, or recommend forEach/column instead |
 | Slab small-N creation | 0.12x (M6 data) | -- | >=0.5x | Hybrid slab (medium effort, evaluate need first) |
 
@@ -205,7 +205,7 @@ The sustained advantage grows disproportionately because JS GC cost scales with 
 
 ## Bottom Line
 
-**Internal goal (per performance-vision.md):** Replace all JS objects. Every operation at >=1x JS throughput. Current status (n=20 medians): 0.55x-0.82x at N=10 (R&D challenge, medium confidence), 0.68x creation / ~1.5x churn at N=100 (promising but high variance), 1.3-10.3x at large scale (dominant, high confidence). The hybrid architecture is the correct path -- M7 proved that JS mode + SoA graduation delivers improved small-N performance while preserving large-N advantages. The N=100 churn result is encouraging but needs benchmark fairness validation (different swap-remove implementations).
+**Internal goal (per performance-vision.md):** Replace all JS objects. Every operation at >=1x JS throughput. Current status (n=20 medians): 0.55x-0.82x at N=10 (R&D challenge, medium confidence), 0.68x creation / ~1x churn at N=100 (promising but high variance), 1.3-10.3x at large scale (dominant, high confidence). The hybrid architecture is the correct path -- M7 proved that JS mode + SoA graduation delivers improved small-N performance while preserving large-N advantages.
 
 **End-user message:** RigidJS hybrid vec is the right choice when you have collections of 50+ entities that you iterate frequently. At N=100 you get 0.68x creation speed (improving) with likely-better churn performance. At large scale you get 3-10x better throughput, 4.4x less memory, and near-zero GC pressure. For tiny, short-lived objects (N<50, create-and-discard), plain JS objects are still faster -- and that gap is an active R&D challenge, not an accepted limitation.
 
