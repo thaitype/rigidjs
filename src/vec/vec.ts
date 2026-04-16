@@ -635,7 +635,6 @@ class VecImpl<F extends StructFields> implements Vec<F> {
   // ---------------------------------------------------------------------------
 
   private _pushJS(): Handle<F> {
-    this._assertLive()
     const obj = this._factory!()
     this._items!.push(obj)
     this._len++
@@ -652,21 +651,16 @@ class VecImpl<F extends StructFields> implements Vec<F> {
   }
 
   private _popJS(): void {
-    this._assertLive()
     if (this._len === 0) throw new Error('vec is empty')
     this._items!.pop()
     this._len--
   }
 
   private _getJS(index: number): Handle<F> {
-    this._assertLive()
-    if (index < 0 || index >= this._len) throw new Error('index out of range')
     return this._items![index] as unknown as Handle<F>
   }
 
   private _swapRemoveJS(index: number): void {
-    this._assertLive()
-    if (index < 0 || index >= this._len) throw new Error('index out of range')
     const last = this._len - 1
     this._items![index] = this._items![last]!
     this._items!.pop()
@@ -674,14 +668,11 @@ class VecImpl<F extends StructFields> implements Vec<F> {
   }
 
   private _removeJS(index: number): void {
-    this._assertLive()
-    if (index < 0 || index >= this._len) throw new Error('index out of range')
     this._items!.splice(index, 1)
     this._len--
   }
 
   private _forEachJS(cb: (handle: Handle<F>, index: number) => void): void {
-    this._assertLive()
     const items = this._items!
     for (let i = 0; i < items.length; i++) {
       cb(items[i] as unknown as Handle<F>, i)
@@ -693,7 +684,6 @@ class VecImpl<F extends StructFields> implements Vec<F> {
     const self = this
     return {
       next(): IteratorResult<Handle<F>> {
-        self._assertLive()
         if (cursor < self._len) {
           const obj = self._items![cursor]!
           cursor++

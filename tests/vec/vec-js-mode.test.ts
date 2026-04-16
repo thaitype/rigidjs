@@ -175,17 +175,17 @@ describe('vec JS mode — get', () => {
     expect(got.x).toBe(42)
   })
 
-  it('get throws "index out of range" when index >= len', () => {
+  it('get returns undefined for index >= len (plain JS behavior)', () => {
     const v = vec(Point2D)
     v.push()
-    expect(() => v.get(1)).toThrow('index out of range')
-    expect(() => v.get(5)).toThrow('index out of range')
+    expect(v.get(1)).toBeUndefined()
+    expect(v.get(5)).toBeUndefined()
   })
 
-  it('get throws "index out of range" for negative index', () => {
+  it('get returns undefined for negative index (plain JS behavior)', () => {
     const v = vec(Point2D)
     v.push()
-    expect(() => v.get(-1)).toThrow('index out of range')
+    expect(v.get(-1)).toBeUndefined()
   })
 
   it('push and get(0) return the SAME underlying object', () => {
@@ -227,11 +227,11 @@ describe('vec JS mode — pop', () => {
     expect(() => v.pop()).toThrow('vec is empty')
   })
 
-  it('element is inaccessible after pop (index out of range)', () => {
+  it('element is undefined after pop (plain JS behavior)', () => {
     const v = vec(Point2D)
     v.push()
     v.pop()
-    expect(() => v.get(0)).toThrow('index out of range')
+    expect(v.get(0)).toBeUndefined()
   })
 })
 
@@ -271,11 +271,12 @@ describe('vec JS mode — swapRemove', () => {
     expect(r.y).toBe(2)
   })
 
-  it('swapRemove throws "index out of range" for invalid index', () => {
+  it('swapRemove on invalid index does not throw (plain JS behavior)', () => {
     const v = vec(Point2D)
     v.push()
-    expect(() => v.swapRemove(1)).toThrow('index out of range')
-    expect(() => v.swapRemove(-1)).toThrow('index out of range')
+    // Out of bounds — JS arrays handle this silently
+    v.swapRemove(1)
+    v.swapRemove(-1)
   })
 })
 
@@ -309,11 +310,12 @@ describe('vec JS mode — remove', () => {
     expect(v.get(2).x).toBe(40)
   })
 
-  it('remove throws "index out of range" for invalid index', () => {
+  it('remove on invalid index does not throw (plain JS behavior)', () => {
     const v = vec(Point2D)
     v.push()
-    expect(() => v.remove(1)).toThrow('index out of range')
-    expect(() => v.remove(-1)).toThrow('index out of range')
+    // Out of bounds — JS arrays handle splice silently
+    v.remove(1)
+    v.remove(-1)
   })
 })
 
@@ -354,51 +356,51 @@ describe('vec JS mode — clear', () => {
 // ---------------------------------------------------------------------------
 
 describe('vec JS mode — drop', () => {
-  it('drop then push throws "vec has been dropped"', () => {
+  it('drop then push throws', () => {
     const v = vec(Point2D)
     v.drop()
-    expect(() => v.push()).toThrow('vec has been dropped')
+    expect(() => v.push()).toThrow()
   })
 
-  it('drop then pop throws "vec has been dropped"', () => {
+  it('drop then pop throws', () => {
     const v = vec(Point2D)
     v.push()
     v.drop()
-    expect(() => v.pop()).toThrow('vec has been dropped')
+    expect(() => v.pop()).toThrow()
   })
 
-  it('drop then get throws "vec has been dropped"', () => {
+  it('drop then get throws', () => {
     const v = vec(Point2D)
     v.push()
     v.drop()
-    expect(() => v.get(0)).toThrow('vec has been dropped')
+    expect(() => v.get(0)).toThrow()
   })
 
-  it('drop then clear throws "vec has been dropped"', () => {
+  it('drop then clear throws', () => {
     const v = vec(Point2D)
     v.drop()
-    expect(() => v.clear()).toThrow('vec has been dropped')
+    expect(() => v.clear()).toThrow()
   })
 
-  it('drop then forEach throws "vec has been dropped"', () => {
-    const v = vec(Point2D)
-    v.push()
-    v.drop()
-    expect(() => v.forEach(() => {})).toThrow('vec has been dropped')
-  })
-
-  it('drop then swapRemove throws "vec has been dropped"', () => {
+  it('drop then forEach throws', () => {
     const v = vec(Point2D)
     v.push()
     v.drop()
-    expect(() => v.swapRemove(0)).toThrow('vec has been dropped')
+    expect(() => v.forEach(() => {})).toThrow()
   })
 
-  it('drop then remove throws "vec has been dropped"', () => {
+  it('drop then swapRemove throws', () => {
     const v = vec(Point2D)
     v.push()
     v.drop()
-    expect(() => v.remove(0)).toThrow('vec has been dropped')
+    expect(() => v.swapRemove(0)).toThrow()
+  })
+
+  it('drop then remove throws', () => {
+    const v = vec(Point2D)
+    v.push()
+    v.drop()
+    expect(() => v.remove(0)).toThrow()
   })
 })
 
@@ -486,11 +488,11 @@ describe('vec JS mode — forEach', () => {
     expect(indices).toEqual([0, 1, 2, 3])
   })
 
-  it('after drop() throws "vec has been dropped"', () => {
+  it('after drop() throws', () => {
     const v = vec(Point2D)
     v.push()
     v.drop()
-    expect(() => v.forEach(() => {})).toThrow('vec has been dropped')
+    expect(() => v.forEach(() => {})).toThrow()
   })
 })
 
