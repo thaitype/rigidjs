@@ -1,5 +1,5 @@
 import type { StructDef, StructFields, Handle, ColumnKey, ColumnType } from '../types.js'
-import { generateSoAHandleClass } from '../struct/handle-codegen.js'
+import { generateSoAHandleFactory, buildColumnArgs } from '../struct/handle-codegen.js'
 import type { ColumnRef } from '../struct/handle-codegen.js'
 import { bitmapByteLength, bitmapSet, bitmapClear, bitmapGet } from './bitmap.js'
 
@@ -189,10 +189,18 @@ export function slab<F extends StructFields>(
   }
 
   // --- Build the reusable SoA handle ---
-  // generateSoAHandleClass builds a class whose field getters/setters do pure TypedArray
-  // indexed access: `this._c_pos_x[this._slot]`. Column TypedArrays are captured in the
-  // class closure at construction time — no per-call lookup, no allocation.
-  const HandleClass = generateSoAHandleClass(layout.handleTree, columnRefs)
+  // Use cached factory on StructDef so new Function() runs at most once per struct.
+  // On first call, generateSoAHandleFactory() is called and stored on def._SoAHandleFactory.
+  // Subsequent slab() calls for the same struct reuse the factory, passing new column arrays.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field on StructDef
+  if (!(def as any)._SoAHandleFactory) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
+    ;(def as any)._SoAHandleFactory = generateSoAHandleFactory(layout.handleTree)
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
+  const soaFactory = (def as any)._SoAHandleFactory as (...args: unknown[]) => new (slot: number) => object
+  const columnArgs = buildColumnArgs(layout.handleTree, columnRefs)
+  const HandleClass = soaFactory(...columnArgs)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SoAHandleConstructor returns `object`; any isolates the bridge
   const _handle = new (HandleClass as any)(0) as Handle<F>
 

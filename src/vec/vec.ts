@@ -1,7 +1,7 @@
 import type { StructDef, StructFields, Handle, ColumnKey, ColumnType } from '../types.js'
 import { computeColumnLayout } from '../struct/layout.js'
-import { generateSoAHandleClass } from '../struct/handle-codegen.js'
-import type { ColumnRef } from '../struct/handle-codegen.js'
+import { generateSoAHandleFactory, buildColumnArgs } from '../struct/handle-codegen.js'
+import type { ColumnRef, SoAHandleConstructor } from '../struct/handle-codegen.js'
 import { generateJSObjectFactory, generateCopyToColumnsFn } from './js-codegen.js'
 
 // ---------------------------------------------------------------------------
@@ -290,7 +290,7 @@ class VecImpl<F extends StructFields> implements Vec<F> {
   private _columnRefs: Map<string, ColumnRef>
   private _columnArrays: AnyTypedArray[]
   private _swapFn: (index: number, lastIndex: number) => void
-  private _HandleClass: ReturnType<typeof generateSoAHandleClass> | null
+  private _HandleClass: SoAHandleConstructor | null
   private _handle: Handle<F> | null
 
   // Layout is shared across instances via def._columnLayout
@@ -408,7 +408,7 @@ class VecImpl<F extends StructFields> implements Vec<F> {
       this._buf = new ArrayBuffer(this._layout.sizeofPerSlot * soaInitialCapacity)
       this._capacity = soaInitialCapacity
       this._buildColumns(this._buf, this._capacity)
-      this._HandleClass = generateSoAHandleClass(this._layout.handleTree, this._columnRefs)
+      this._HandleClass = this._buildHandleClass()
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       this._handle = new (this._HandleClass as any)(0) as Handle<F>
     } else {
@@ -493,6 +493,26 @@ class VecImpl<F extends StructFields> implements Vec<F> {
   }
 
   /**
+   * Get (or lazily create and cache) the SoA handle factory on the StructDef,
+   * then instantiate a handle class from it using the current column refs.
+   *
+   * The factory (`new Function()` call) runs at most once per StructDef regardless
+   * of how many vec instances share the same struct. Subsequent calls reuse the
+   * cached factory and only invoke it with the current column TypedArrays.
+   */
+  private _buildHandleClass(): SoAHandleConstructor {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field on StructDef
+    if (!(this._def as any)._SoAHandleFactory) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
+      ;(this._def as any)._SoAHandleFactory = generateSoAHandleFactory(this._layout.handleTree)
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
+    const factory = (this._def as any)._SoAHandleFactory as (...args: unknown[]) => SoAHandleConstructor
+    const columnArgs = buildColumnArgs(this._layout.handleTree, this._columnRefs)
+    return factory(...columnArgs)
+  }
+
+  /**
    * Grow the SoA backing buffer to 2x capacity.
    *
    * Steps:
@@ -534,7 +554,8 @@ class VecImpl<F extends StructFields> implements Vec<F> {
 
     // Re-create handle with new column refs (Strategy A).
     // The old _HandleClass and old _handle become unreferenced and GC-collectable.
-    this._HandleClass = generateSoAHandleClass(this._layout.handleTree, this._columnRefs)
+    // Uses cached factory on StructDef — new Function() is NOT called again.
+    this._HandleClass = this._buildHandleClass()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this._handle = new (this._HandleClass as any)(0) as Handle<F>
   }
@@ -574,8 +595,9 @@ class VecImpl<F extends StructFields> implements Vec<F> {
     const copyFn = generateCopyToColumnsFn(this._def.fields, this._columnRefs)
     copyFn(this._items!, this._len)
 
-    // Step 5+6: generate SoA handle class and create handle instance.
-    this._HandleClass = generateSoAHandleClass(this._layout.handleTree, this._columnRefs)
+    // Step 5+6: get/create SoA handle factory (cached on StructDef) and create handle instance.
+    // Uses cached factory — new Function() is NOT called again after first graduation.
+    this._HandleClass = this._buildHandleClass()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this._handle = new (this._HandleClass as any)(0) as Handle<F>
 
@@ -845,7 +867,8 @@ class VecImpl<F extends StructFields> implements Vec<F> {
     }
     this._buf = newBuf
     this._capacity = n
-    this._HandleClass = generateSoAHandleClass(this._layout.handleTree, this._columnRefs)
+    // Uses cached factory on StructDef — new Function() is NOT called again.
+    this._HandleClass = this._buildHandleClass()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this._handle = new (this._HandleClass as any)(0) as Handle<F>
   }

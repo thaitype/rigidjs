@@ -38,6 +38,8 @@ export interface StructDef<F extends StructFields> {
   readonly _columnLayout?: import('./struct/layout.js').ColumnLayout
   /** @internal Cached JS object factory for hybrid vec mode — lazy-initialized on first vec() call. */
   _JSFactory?: () => object
+  /** @internal Cached SoA handle factory — lazy-initialized on first SoA container creation. */
+  _SoAHandleFactory?: (...columnArrays: unknown[]) => new (slot: number) => object
 }
 
 /**

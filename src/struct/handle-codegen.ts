@@ -29,12 +29,234 @@ export interface SoAHandleConstructor {
 }
 
 /**
+ * A factory function that accepts column TypedArrays (in layout order) and
+ * returns a SoAHandleConstructor with those columns baked into its closure.
+ *
+ * This is the cacheable part — it is derived from struct layout only and
+ * can be reused across all container instances that share the same StructDef.
+ * Call it with the current column TypedArrays to get a fresh handle class
+ * whose closures capture those specific arrays.
+ *
+ * Internal — not part of the public contract.
+ */
+export type SoAHandleFactory = (...columnArrays: unknown[]) => SoAHandleConstructor
+
+/**
  * Sanitizes a dotted column name into a valid JS identifier suffix.
  * Rule: replace '.' with '_'. E.g. 'pos.x' → 'pos_x', 'life' → 'life'.
  * Used to derive instance field names: '_c_pos_x', '_c_life', etc.
  */
 function sanitizeColumnName(name: string): string {
   return name.replace(/\./g, '_')
+}
+
+/**
+ * Recursively generates the SoA handle class *factory* for one level of the
+ * handle tree.
+ *
+ * Unlike `generateSoAHandleClass`, this function calls `new Function()` exactly
+ * once per handle-tree node and returns a factory:
+ *
+ *   `(...columnArrays) => SoAHandleConstructor`
+ *
+ * The factory's parameter list contains only the leaf column TypedArrays for
+ * this subtree (in depth-first, declaration order). Child constructors are
+ * resolved recursively and **baked into** the outer factory closure via an
+ * immediately-called inner factory — they are NOT re-passed on every call.
+ *
+ * This means the factory itself is layout-dependent only and can be cached on
+ * the StructDef (see `StructDef._SoAHandleFactory`). Callers pass the current
+ * column TypedArrays to the factory to obtain a handle constructor whose
+ * getters/setters access those specific arrays.
+ *
+ * Column order in the factory parameter list matches the order of
+ * `node.numericFields` at each level, collected via a pre-order DFS:
+ *   - Sub-handle columns first (recursively), then this node's own numeric columns.
+ *   This is the same order as the flat `columnRefs` argument list used when
+ *   calling the factory.
+ *
+ * @param node  The HandleNode describing fields at this level.
+ * @returns     A factory `(...columnArrays) => SoAHandleConstructor`.
+ */
+export function generateSoAHandleFactory(node: HandleNode): SoAHandleFactory {
+  // Recursively generate child factories and snapshot their child constructors.
+  // The child constructors are baked into the outer factory by having the outer
+  // new Function() call them immediately — not re-passed on every factory call.
+  const subHandles = node.nestedFields.map(({ name, child }) => {
+    const childFactory = generateSoAHandleFactory(child)
+    return { name, childFactory, childParamName: `_C_${name}` }
+  })
+
+  // Collect numeric entries — their instance field names become the factory params.
+  const numericEntries = node.numericFields.map(({ name, column }) => {
+    const dotted = column.name  // fully qualified dotted key, e.g. 'pos.x'
+    const instanceField = `_c_${sanitizeColumnName(dotted)}`
+    return { fieldName: name, dotted, instanceField }
+  })
+
+  // --- Factory parameter list (layout-only, no TypedArray instances) ---
+  // Only the leaf column TypedArrays for this subtree are parameters.
+  // Child constructors are produced by the child factories; they are wired in
+  // by the outer factory body itself (see factoryBody below).
+  const paramNames: string[] = numericEntries.map(e => e.instanceField)
+
+  // --- Constructor body ---
+  let ctorBody = `this._slot=s;\n`
+  for (const { instanceField } of numericEntries) {
+    ctorBody += `this.${instanceField}=${instanceField};\n`
+  }
+  for (const { name, childParamName } of subHandles) {
+    ctorBody += `this._sub_${name}=new ${childParamName}(s);\n`
+  }
+
+  // --- _rebase method ---
+  let rebaseBody = `this._slot=s;\n`
+  for (const { name } of subHandles) {
+    rebaseBody += `this._sub_${name}._rebase(s);\n`
+  }
+  rebaseBody += `return this;\n`
+
+  // --- Public slot getter ---
+  const slotGetterBody = `get slot(){return this._slot}\n`
+
+  // --- Field accessors ---
+  let accessorBody = ''
+  for (const { fieldName, instanceField } of numericEntries) {
+    accessorBody += `get ${fieldName}(){return this.${instanceField}[this._slot]}\n`
+    accessorBody += `set ${fieldName}(v){this.${instanceField}[this._slot]=v}\n`
+  }
+  for (const { name } of subHandles) {
+    accessorBody += `get ${name}(){return this._sub_${name}}\n`
+  }
+
+  // --- Build the inner class-returning function body ---
+  // The inner function takes only column TypedArrays (paramNames).
+  // Child constructors (_C_<name>) are referenced as outer parameters.
+  const innerFnParams = paramNames.length > 0 ? paramNames.join(',') : ''
+  const innerFnBody = [
+    `return class Handle{`,
+    `constructor(s){${ctorBody}}`,
+    `_rebase(s){${rebaseBody}}`,
+    slotGetterBody,
+    accessorBody,
+    `}`,
+  ].join('\n')
+
+  if (subHandles.length === 0) {
+    // No nested structs: the factory is simply the new Function() itself.
+    // Factory params = column TypedArrays. Returns a handle class.
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval -- intentional codegen; runs once per StructDef
+    const factory = new Function(innerFnParams, innerFnBody) as SoAHandleFactory
+    return factory
+  }
+
+  // --- With nested structs: wrap in an outer factory that bakes child ctors ---
+  // The outer factory captures child constructors in its closure by calling each
+  // child factory with dummy arrays. Wait — we need to pass real arrays to get
+  // a real child constructor.
+  //
+  // The correct design: the OUTER factory also needs to receive column arrays,
+  // split them to sub-factories, then call the inner function with the remainder.
+  //
+  // We track column counts per sub-tree so we can slice the flat args list.
+  //
+  // Column order convention (pre-order DFS, declaration order):
+  //   for each nestedField in order: collect all columns of that subtree
+  //   then: this node's own numericFields
+  //
+  // The factory returned here accepts columns in this flat order.
+
+  // Count how many columns each child subtree has (recursively).
+  // We can compute this from the child HandleNode.
+  function countLeafColumns(n: HandleNode): number {
+    let count = n.numericFields.length
+    for (const { child } of n.nestedFields) {
+      count += countLeafColumns(child)
+    }
+    return count
+  }
+
+  const childColumnCounts = subHandles.map(({ name: _name, childFactory: _cf }) => {
+    // Find the matching nestedField to get the child node.
+    const nestedField = node.nestedFields.find(nf => `_C_${nf.name}` === `_C_${_name}`)!
+    return countLeafColumns(nestedField.child)
+  })
+
+  const totalParams = childColumnCounts.reduce((a, b) => a + b, 0) + numericEntries.length
+
+  // Build a flat-arg factory:
+  //   (...allColumns) => SoAHandleConstructor
+  // where allColumns = [child0cols..., child1cols..., ..., thisLevelCols...]
+  //
+  // We do this via a JavaScript closure that:
+  //   1. Slices the args to extract each child's columns.
+  //   2. Calls each child factory with its slice to get the child ctor.
+  //   3. Calls the inner function (class factory) with the remaining own columns.
+  //
+  // Since we cannot use spread on `arguments` efficiently in strict mode,
+  // we generate another new Function() for the outer wrapper — but this is still
+  // called only once at factory-generation time (when the StructDef is first used).
+
+  const outerParams = Array.from({ length: totalParams }, (_, i) => `_a${i}`).join(',')
+  let outerBody = ''
+  let argIdx = 0
+  const childCtorVars: string[] = []
+  for (let i = 0; i < subHandles.length; i++) {
+    const count = childColumnCounts[i]!
+    const childArgs = Array.from({ length: count }, (_, j) => `_a${argIdx + j}`).join(',')
+    argIdx += count
+    const childCtorVar = `_cc${i}`
+    childCtorVars.push(childCtorVar)
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    outerBody += `var ${childCtorVar}=_childFactories[${i}](${childArgs});\n`
+  }
+  // Remaining args are this node's own column arrays.
+  const ownArgs = Array.from({ length: numericEntries.length }, (_, j) => `_a${argIdx + j}`).join(',')
+
+  // Re-assemble the inner class body, but now the child ctor params (_C_<name>)
+  // are the childCtorVars instead of outer params.
+  // We need to substitute child param names. Easiest: rebuild ctorBody with child ctor vars.
+  let ctorBody2 = `this._slot=s;\n`
+  for (const { instanceField } of numericEntries) {
+    ctorBody2 += `this.${instanceField}=${instanceField};\n`
+  }
+  for (let i = 0; i < subHandles.length; i++) {
+    ctorBody2 += `this._sub_${subHandles[i]!.name}=new ${childCtorVars[i]}(s);\n`
+  }
+
+  let accessorBody2 = ''
+  for (const { fieldName, instanceField } of numericEntries) {
+    accessorBody2 += `get ${fieldName}(){return this.${instanceField}[this._slot]}\n`
+    accessorBody2 += `set ${fieldName}(v){this.${instanceField}[this._slot]=v}\n`
+  }
+  for (const { name } of subHandles) {
+    accessorBody2 += `get ${name}(){return this._sub_${name}}\n`
+  }
+
+  const innerBody2 = [
+    `return class Handle{`,
+    `constructor(s){${ctorBody2}}`,
+    `_rebase(s){${rebaseBody}}`,
+    slotGetterBody,
+    accessorBody2,
+    `}`,
+  ].join('\n')
+
+  const innerFnParams2 = numericEntries.map(e => e.instanceField).join(',')
+
+  outerBody += `return (function(${innerFnParams2}){\n${innerBody2}\n})(${ownArgs});\n`
+
+  // The outer factory captures _childFactories via a wrapping IIFE-style approach:
+  // we create a function that takes _childFactories as closure and returns the
+  // actual factory that takes flat column args.
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval -- intentional codegen; runs once per StructDef
+  const makeOuterFactory = new Function(
+    '_childFactories',
+    `return function factory(${outerParams}){\n${outerBody}}`,
+  ) as (childFactories: SoAHandleFactory[]) => SoAHandleFactory
+
+  const childFactoriesList = subHandles.map(s => s.childFactory)
+  return makeOuterFactory(childFactoriesList)
 }
 
 /**
@@ -53,6 +275,10 @@ function sanitizeColumnName(name: string): string {
  *  - Emits one getter+setter pair per leaf numeric field with bodies that do
  *    pure TypedArray indexed access: no dispatch, no closures, no allocations.
  *
+ * This is a convenience wrapper around `generateSoAHandleFactory` that accepts
+ * the current column refs map and immediately calls the factory to get a handle
+ * constructor.
+ *
  * @param node        The HandleNode describing fields at this level.
  * @param columnRefs  Map from dotted column name to ColumnRef (TypedArray + name).
  */
@@ -60,93 +286,45 @@ export function generateSoAHandleClass(
   node: HandleNode,
   columnRefs: ReadonlyMap<string, ColumnRef>,
 ): SoAHandleConstructor {
-  // Collect the column descriptors for all numeric fields at this level.
-  // These are the TypedArrays that will be baked into the class closure.
-  const numericEntries = node.numericFields.map(({ name, column }) => {
-    const dotted = column.name  // fully qualified dotted key, e.g. 'pos.x'
+  const factory = generateSoAHandleFactory(node)
+  const columnArgs = buildColumnArgs(node, columnRefs)
+  return factory(...columnArgs)
+}
+
+/**
+ * Build the flat ordered list of column TypedArrays for a handle tree node.
+ *
+ * Order: pre-order DFS — for each nestedField collect its subtree columns first,
+ * then this node's own numericFields. This matches the parameter order of the
+ * factory returned by generateSoAHandleFactory.
+ *
+ * @param node        The HandleNode to collect columns for.
+ * @param columnRefs  Map from dotted column name to ColumnRef.
+ * @returns           Ordered array of TypedArray instances.
+ */
+export function buildColumnArgs(
+  node: HandleNode,
+  columnRefs: ReadonlyMap<string, ColumnRef>,
+): unknown[] {
+  const args: unknown[] = []
+
+  // Sub-tree columns first (pre-order DFS over nestedFields).
+  for (const { child } of node.nestedFields) {
+    const childArgs = buildColumnArgs(child, columnRefs)
+    args.push(...childArgs)
+  }
+
+  // Then this node's own numeric columns.
+  for (const { column } of node.numericFields) {
+    const dotted = column.name
     const ref = columnRefs.get(dotted)
     if (ref === undefined) {
-      throw new Error(`generateSoAHandleClass: no column ref found for '${dotted}'`)
+      throw new Error(`buildColumnArgs: no column ref found for '${dotted}'`)
     }
-    return { fieldName: name, dotted, instanceField: `_c_${sanitizeColumnName(dotted)}`, array: ref.array }
-  })
-
-  // Collect nested sub-handle classes (generated recursively) and their field names.
-  // Each child class is passed as a named parameter to the outer factory function.
-  const subHandles = node.nestedFields.map(({ name, child }) => {
-    const ChildCtor = generateSoAHandleClass(child, columnRefs)
-    return { name, ChildCtor, childParamName: `_C_${name}` }
-  })
-
-  // --- Build factory parameter list ---
-  // Order: child constructors first, then column TypedArrays.
-  // This mirrors the pattern in generateHandleClass for child ctors.
-  const paramNames: string[] = [
-    ...subHandles.map(s => s.childParamName),
-    ...numericEntries.map(e => e.instanceField),
-  ]
-
-  // --- Constructor body ---
-  // Assign each baked column ref to `this.<instanceField>` once.
-  // Then construct sub-handles once per nested field.
-  let ctorBody = `this._slot=s;\n`
-  for (const { instanceField } of numericEntries) {
-    // The column TypedArray is passed in via the factory closure parameter
-    // of the same name as the instance field. Store it on `this`.
-    ctorBody += `this.${instanceField}=${instanceField};\n`
-  }
-  for (const { name, childParamName } of subHandles) {
-    ctorBody += `this._sub_${name}=new ${childParamName}(s);\n`
+    args.push(ref.array)
   }
 
-  // --- _rebase method ---
-  // Updates _slot and recursively rebases sub-handles.
-  // No DataView refs to update — column arrays are constant.
-  let rebaseBody = `this._slot=s;\n`
-  for (const { name } of subHandles) {
-    rebaseBody += `this._sub_${name}._rebase(s);\n`
-  }
-  rebaseBody += `return this;\n`
-
-  // --- Public slot getter ---
-  const slotGetterBody = `get slot(){return this._slot}\n`
-
-  // --- Field accessors ---
-  // Leaf numeric fields: pure TypedArray indexed access (zero allocation, monomorphic).
-  // Nested struct fields: return pre-constructed sub-handle reference.
-  let accessorBody = ''
-  for (const { fieldName, instanceField } of numericEntries) {
-    // Getter: return this._c_pos_x[this._slot]
-    accessorBody += `get ${fieldName}(){return this.${instanceField}[this._slot]}\n`
-    // Setter: this._c_pos_x[this._slot] = v
-    accessorBody += `set ${fieldName}(v){this.${instanceField}[this._slot]=v}\n`
-  }
-  for (const { name } of subHandles) {
-    // Nested struct field: return the pre-built sub-handle — zero allocation.
-    accessorBody += `get ${name}(){return this._sub_${name}}\n`
-  }
-
-  // --- Assemble the factory function body ---
-  const factoryParams = paramNames.length > 0 ? paramNames.join(',') : ''
-  const factoryBody = [
-    `return class Handle{`,
-    `constructor(s){${ctorBody}}`,
-    `_rebase(s){${rebaseBody}}`,
-    slotGetterBody,
-    accessorBody,
-    `}`,
-  ].join('\n')
-
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval -- intentional: codegen happens once at struct() call time
-  const factory = new Function(factoryParams, factoryBody) as (...args: unknown[]) => SoAHandleConstructor
-
-  // Pass child constructors first, then the actual TypedArray instances.
-  const factoryArgs: unknown[] = [
-    ...subHandles.map(s => s.ChildCtor),
-    ...numericEntries.map(e => e.array),
-  ]
-
-  return factory(...factoryArgs)
+  return args
 }
 
 /**
