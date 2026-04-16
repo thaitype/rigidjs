@@ -283,15 +283,15 @@ class VecImpl<F extends StructFields> implements Vec<F> {
   private _items: object[] | null
   private _factory: (() => object) | null
 
-  // SoA mode state
-  private _buf: ArrayBuffer | null
-  private _capacity: number
-  private _columnMap: Map<string, AnyTypedArray>
-  private _columnRefs: Map<string, ColumnRef>
-  private _columnArrays: AnyTypedArray[]
-  private _swapFn: (index: number, lastIndex: number) => void
-  private _HandleClass: SoAHandleConstructor | null
-  private _handle: Handle<F> | null
+  // SoA mode state — not initialized in JS mode; set in _graduateToSoA() before first use
+  private _buf: ArrayBuffer | undefined
+  private _capacity: number | undefined
+  private _columnMap: Map<string, AnyTypedArray> | undefined
+  private _columnRefs: Map<string, ColumnRef> | undefined
+  private _columnArrays: AnyTypedArray[] | undefined
+  private _swapFn: ((index: number, lastIndex: number) => void) | undefined
+  private _HandleClass: SoAHandleConstructor | undefined
+  private _handle: Handle<F> | undefined
 
   // Layout is shared across instances via def._columnLayout
   private readonly _layout: ReturnType<typeof computeColumnLayout>
@@ -393,28 +393,25 @@ class VecImpl<F extends StructFields> implements Vec<F> {
     // Initialize SoA mode state
     // ---------------------------------------------------------------------------
 
-    // Default SoA capacity when mode: 'soa' is forced without an explicit capacity.
-    const SOA_DEFAULT_CAPACITY = 16
-    const soaInitialCapacity = jsMode ? 0 : (initialCapacity ?? SOA_DEFAULT_CAPACITY)
-
-    this._columnMap = new Map()
-    this._columnRefs = new Map()
-    this._columnArrays = []
-    this._swapFn = () => {}
-    this._HandleClass = null
-    this._handle = null
-
     if (!jsMode) {
+      // --- Initialize SoA state immediately (SoA mode) ---
+      // Default SoA capacity when mode: 'soa' is forced without an explicit capacity.
+      const SOA_DEFAULT_CAPACITY = 16
+      const soaInitialCapacity = initialCapacity ?? SOA_DEFAULT_CAPACITY
+
+      this._columnMap = new Map()
+      this._columnRefs = new Map()
+      this._columnArrays = []
       this._buf = new ArrayBuffer(this._layout.sizeofPerSlot * soaInitialCapacity)
       this._capacity = soaInitialCapacity
-      this._buildColumns(this._buf, this._capacity)
+      this._buildColumns(this._buf, soaInitialCapacity)
       this._HandleClass = this._buildHandleClass()
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       this._handle = new (this._HandleClass as any)(0) as Handle<F>
-    } else {
-      this._buf = null
-      this._capacity = 0
     }
+    // JS mode: _buf, _capacity, _columnMap, _columnRefs, _columnArrays, _swapFn,
+    // _HandleClass, _handle are intentionally NOT initialized. They will be set
+    // in _graduateToSoA() before any SoA code reads them.
 
     // ---------------------------------------------------------------------------
     // Method swapping: bind the correct implementation to each hot-path slot.
@@ -508,7 +505,7 @@ class VecImpl<F extends StructFields> implements Vec<F> {
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mutable internal cache field
     const factory = (this._def as any)._SoAHandleFactory as (...args: unknown[]) => SoAHandleConstructor
-    const columnArgs = buildColumnArgs(this._layout.handleTree, this._columnRefs)
+    const columnArgs = buildColumnArgs(this._layout.handleTree, this._columnRefs!)
     return factory(...columnArgs)
   }
 
@@ -532,11 +529,11 @@ class VecImpl<F extends StructFields> implements Vec<F> {
    * monomorphic throughout its lifetime, enabling full JIT specialization.
    */
   private _grow(): void {
-    const newCapacity = this._capacity * 2
+    const newCapacity = this._capacity! * 2
     const newBuf = new ArrayBuffer(this._layout.sizeofPerSlot * newCapacity)
 
     // Snapshot old columns before rebuilding.
-    const oldColumnArrays = this._columnArrays.slice()
+    const oldColumnArrays = this._columnArrays!.slice()
 
     // Build new columns over the new buffer.
     this._buildColumns(newBuf, newCapacity)
@@ -544,8 +541,8 @@ class VecImpl<F extends StructFields> implements Vec<F> {
     // Copy all existing data from old columns to new columns.
     // TypedArray.set(source) copies the entire source array into the target
     // starting at offset 0 — one native call per column.
-    for (let c = 0; c < this._columnArrays.length; c++) {
-      this._columnArrays[c]!.set(oldColumnArrays[c]!)
+    for (let c = 0; c < this._columnArrays!.length; c++) {
+      this._columnArrays![c]!.set(oldColumnArrays[c]!)
     }
 
     // Update internal state.
@@ -592,7 +589,7 @@ class VecImpl<F extends StructFields> implements Vec<F> {
     // Step 4: copy data from JS objects into TypedArray columns.
     // generateCopyToColumnsFn produces a codegen'd function that iterates
     // once and copies each field to its column TypedArray.
-    const copyFn = generateCopyToColumnsFn(this._def.fields, this._columnRefs)
+    const copyFn = generateCopyToColumnsFn(this._def.fields, this._columnRefs!)
     copyFn(this._items!, this._len)
 
     // Step 5+6: get/create SoA handle factory (cached on StructDef) and create handle instance.
@@ -722,7 +719,7 @@ class VecImpl<F extends StructFields> implements Vec<F> {
 
   private _pushSoA(): Handle<F> {
     this._assertLive()
-    if (this._len >= this._capacity) {
+    if (this._len >= this._capacity!) {
       this._grow()
     }
     const slot = this._len
@@ -750,15 +747,15 @@ class VecImpl<F extends StructFields> implements Vec<F> {
     this._assertLive()
     if (index < 0 || index >= this._len) throw new Error('index out of range')
     // _swapFn is a codegen-unrolled function: no column loop at call time.
-    this._swapFn(index, this._len - 1)
+    this._swapFn!(index, this._len - 1)
     this._len--
   }
 
   private _removeSoA(index: number): void {
     this._assertLive()
     if (index < 0 || index >= this._len) throw new Error('index out of range')
-    for (let c = 0; c < this._columnArrays.length; c++) {
-      this._columnArrays[c]!.copyWithin(index, index + 1, this._len)
+    for (let c = 0; c < this._columnArrays!.length; c++) {
+      this._columnArrays![c]!.copyWithin(index, index + 1, this._len)
     }
     this._len--
   }
@@ -802,7 +799,7 @@ class VecImpl<F extends StructFields> implements Vec<F> {
       // JS arrays grow automatically; capacity === len in JS mode.
       return this._len
     }
-    return this._capacity
+    return this._capacity!
   }
 
   clear(): void {
@@ -821,7 +818,7 @@ class VecImpl<F extends StructFields> implements Vec<F> {
       this._items = null
     } else {
       // Null out internal references so GC can reclaim them.
-      this._buf = null
+      this._buf = undefined
     }
   }
 
@@ -839,7 +836,7 @@ class VecImpl<F extends StructFields> implements Vec<F> {
       // Auto-graduate: caller clearly wants TypedArray (SoA) data.
       this._graduateToSoA()
     }
-    const arr = this._columnMap.get(name)
+    const arr = this._columnMap!.get(name)
     if (arr === undefined) {
       throw new Error(`unknown column: ${name}`)
     }
@@ -856,14 +853,14 @@ class VecImpl<F extends StructFields> implements Vec<F> {
       return
     }
     // No-op if already large enough.
-    if (this._capacity >= n) return
+    if (this._capacity! >= n) return
 
     // Grow to exactly n.
     const newBuf = new ArrayBuffer(this._layout.sizeofPerSlot * n)
-    const oldColumnArrays = this._columnArrays.slice()
+    const oldColumnArrays = this._columnArrays!.slice()
     this._buildColumns(newBuf, n)
-    for (let c = 0; c < this._columnArrays.length; c++) {
-      this._columnArrays[c]!.set(oldColumnArrays[c]!)
+    for (let c = 0; c < this._columnArrays!.length; c++) {
+      this._columnArrays![c]!.set(oldColumnArrays[c]!)
     }
     this._buf = newBuf
     this._capacity = n

@@ -1,0 +1,154 @@
+{
+  "meta": {
+    "date": "2026-04-16",
+    "bunVersion": "1.3.8",
+    "platform": "darwin",
+    "arch": "arm64",
+    "milestone": "M8",
+    "task": "task-2",
+    "change": "Lazy VecImpl property init for JS mode — defer 8 SoA-related properties",
+    "methodology": "Per-process JIT isolation. Small-scale (N=10,100,1000) n=20 medians with stddev. Large-scale n=3 medians.",
+    "baselineReference": ".chief/milestone-8/_report/task-1/results.json"
+  },
+  "oneShot": {
+    "B1-hybrid": {
+      "n": 20,
+      "results": [
+        { "name": "B1-hybrid JS N=10",            "medianOps": 752571, "minOps": 429799, "maxOps": 1481299, "stddev": 221111 },
+        { "name": "B1-hybrid JS N=100",           "medianOps": 315671, "minOps": 179286, "maxOps": 600465,  "stddev": 95635 },
+        { "name": "B1-hybrid JS N=1000",          "medianOps": 55182,  "minOps": 45237,  "maxOps": 68420,   "stddev": 5570 },
+        { "name": "B1-hybrid RigidJS vec N=10",   "medianOps": 376048, "minOps": 227262, "maxOps": 1213408, "stddev": 195472 },
+        { "name": "B1-hybrid RigidJS vec N=100",  "medianOps": 205911, "minOps": 151170, "maxOps": 436023,  "stddev": 75894 },
+        { "name": "B1-hybrid RigidJS vec N=1000", "medianOps": 20619,  "minOps": 16962,  "maxOps": 25715,   "stddev": 2062 }
+      ],
+      "ratios": {
+        "N=10":   { "jsOps": 752571, "rigidOps": 376048, "ratio": 0.50 },
+        "N=100":  { "jsOps": 315671, "rigidOps": 205911, "ratio": 0.65 },
+        "N=1000": { "jsOps": 55182,  "rigidOps": 20619,  "ratio": 0.37 }
+      }
+    },
+    "B2-hybrid": {
+      "n": 20,
+      "results": [
+        { "name": "B2-hybrid JS N=10",            "medianOps": 291472, "minOps": 160664, "maxOps": 819397,  "stddev": 182166 },
+        { "name": "B2-hybrid JS N=100",           "medianOps": 239832, "minOps": 83568,  "maxOps": 760699,  "stddev": 201195 },
+        { "name": "B2-hybrid JS N=1000",          "medianOps": 61614,  "minOps": 36017,  "maxOps": 132832,  "stddev": 20466 },
+        { "name": "B2-hybrid RigidJS vec N=10",   "medianOps": 270009, "minOps": 152993, "maxOps": 569937,  "stddev": 112791 },
+        { "name": "B2-hybrid RigidJS vec N=100",  "medianOps": 287340, "minOps": 113101, "maxOps": 799469,  "stddev": 156969 },
+        { "name": "B2-hybrid RigidJS vec N=1000", "medianOps": 17658,  "minOps": 14708,  "maxOps": 42305,   "stddev": 8276 }
+      ],
+      "ratios": {
+        "N=10":   { "jsOps": 291472, "rigidOps": 270009, "ratio": 0.93 },
+        "N=100":  { "jsOps": 239832, "rigidOps": 287340, "ratio": 1.20 },
+        "N=1000": { "jsOps": 61614,  "rigidOps": 17658,  "ratio": 0.29 }
+      }
+    },
+    "B10-graduation": {
+      "n": 20,
+      "results": [
+        { "name": "B10-graduation JS baseline N=128",      "medianOps": 257027, "minOps": 169585, "maxOps": 466636, "stddev": 62404 },
+        { "name": "B10-graduation JS baseline N=256",      "medianOps": 125797, "minOps": 100229, "maxOps": 257384, "stddev": 48365 },
+        { "name": "B10-graduation RigidJS graduateAt=128", "medianOps": 33894,  "minOps": 14237,  "maxOps": 55409,  "stddev": 10473 },
+        { "name": "B10-graduation RigidJS graduateAt=256", "medianOps": 24332,  "minOps": 20134,  "maxOps": 43704,  "stddev": 6458 }
+      ],
+      "ratios": {
+        "N=128": { "jsOps": 257027, "rigidOps": 33894, "ratio": 0.13 },
+        "N=256": { "jsOps": 125797, "rigidOps": 24332, "ratio": 0.19 }
+      }
+    },
+    "B1-small-scale": {
+      "n": 20,
+      "results": [
+        { "name": "B1-small JS N=10",             "medianOps": 845911, "minOps": 384930, "maxOps": 1465023, "stddev": 296888 },
+        { "name": "B1-small JS N=100",            "medianOps": 291321, "minOps": 151772, "maxOps": 742643,  "stddev": 124600 },
+        { "name": "B1-small JS N=1000",           "medianOps": 53704,  "minOps": 43484,  "maxOps": 80173,   "stddev": 9911 },
+        { "name": "B1-small RigidJS slab N=10",   "medianOps": 207593, "minOps": 106741, "maxOps": 419632,  "stddev": 77589 },
+        { "name": "B1-small RigidJS vec N=10",    "medianOps": 139612, "minOps": 79086,  "maxOps": 382653,  "stddev": 58883 },
+        { "name": "B1-small RigidJS slab N=100",  "medianOps": 79874,  "minOps": 69314,  "maxOps": 151533,  "stddev": 17535 },
+        { "name": "B1-small RigidJS vec N=100",   "medianOps": 130103, "minOps": 65316,  "maxOps": 240708,  "stddev": 44804 },
+        { "name": "B1-small RigidJS slab N=1000", "medianOps": 25820,  "minOps": 22099,  "maxOps": 36691,   "stddev": 4411 },
+        { "name": "B1-small RigidJS vec N=1000",  "medianOps": 27749,  "minOps": 4927,   "maxOps": 51875,   "stddev": 9104 }
+      ]
+    },
+    "B2-small-scale": {
+      "n": 20,
+      "results": [
+        { "name": "B2-small JS N=10",             "medianOps": 188925, "minOps": 117670, "maxOps": 523218,  "stddev": 115894 },
+        { "name": "B2-small JS N=100",            "medianOps": 224825, "minOps": 141268, "maxOps": 355398,  "stddev": 62263 },
+        { "name": "B2-small JS N=1000",           "medianOps": 29574,  "minOps": 22673,  "maxOps": 47580,   "stddev": 4947 },
+        { "name": "B2-small RigidJS slab N=10",   "medianOps": 101211, "minOps": 23057,  "maxOps": 286259,  "stddev": 59278 },
+        { "name": "B2-small RigidJS vec N=10",    "medianOps": 185172, "minOps": 86652,  "maxOps": 471789,  "stddev": 90482 },
+        { "name": "B2-small RigidJS slab N=100",  "medianOps": 53028,  "minOps": 39843,  "maxOps": 106059,  "stddev": 14247 },
+        { "name": "B2-small RigidJS vec N=100",   "medianOps": 162568, "minOps": 97040,  "maxOps": 594941,  "stddev": 99295 },
+        { "name": "B2-small RigidJS slab N=1000", "medianOps": 10702,  "minOps": 9624,   "maxOps": 20831,   "stddev": 3476 },
+        { "name": "B2-small RigidJS vec N=1000",  "medianOps": 21765,  "minOps": 14856,  "maxOps": 58245,   "stddev": 10312 }
+      ]
+    },
+    "B3-small-scale": {
+      "n": 20,
+      "results": [
+        { "name": "B3-small JS N=10",                    "medianOps": 5846813, "minOps": 3101698, "maxOps": 12933131, "stddev": 1959459 },
+        { "name": "B3-small JS N=100",                   "medianOps": 2326276, "minOps": 1663490, "maxOps": 3239041,  "stddev": 409408 },
+        { "name": "B3-small JS N=1000",                  "medianOps": 316189,  "minOps": 131907,  "maxOps": 634266,   "stddev": 95317 },
+        { "name": "B3-small RigidJS vec indexed N=10",   "medianOps": 1138577, "minOps": 890631,  "maxOps": 2673380,  "stddev": 392171 },
+        { "name": "B3-small RigidJS vec column N=10",    "medianOps": 6055873, "minOps": 3373961, "maxOps": 11450924, "stddev": 2177742 },
+        { "name": "B3-small RigidJS vec indexed N=100",  "medianOps": 249755,  "minOps": 219237,  "maxOps": 312161,   "stddev": 26419 },
+        { "name": "B3-small RigidJS vec column N=100",   "medianOps": 4359165, "minOps": 2848462, "maxOps": 5707085,  "stddev": 973153 },
+        { "name": "B3-small RigidJS vec indexed N=1000", "medianOps": 41425,   "minOps": 26656,   "maxOps": 43539,    "stddev": 3398 },
+        { "name": "B3-small RigidJS vec column N=1000",  "medianOps": 993592,  "minOps": 814216,  "maxOps": 1384594,  "stddev": 144622 }
+      ]
+    },
+    "large-scale-oneshot": {
+      "n": 3,
+      "results": [
+        { "name": "B1-slab JS 100k",           "medianOps": 516 },
+        { "name": "B1-slab RigidJS 100k",      "medianOps": 243 },
+        { "name": "B2-slab JS 10k churn",      "medianOps": 5270 },
+        { "name": "B2-slab RigidJS 10k churn", "medianOps": 8623 },
+        { "name": "B3-iterate JS 100k",        "medianOps": 3510 },
+        { "name": "B3-iterate RigidJS 100k",   "medianOps": 4508 },
+        { "name": "B3-column RigidJS 100k",    "medianOps": 12311 },
+        { "name": "B7-nested JS 50k",          "medianOps": 498 },
+        { "name": "B7-nested JS flat 50k",     "medianOps": 633 },
+        { "name": "B7-nested RigidJS 50k",     "medianOps": 218 },
+        { "name": "B1-vec JS 100k",            "medianOps": 497 },
+        { "name": "B1-vec RigidJS 100k",       "medianOps": 373 },
+        { "name": "B2-vec JS 10k churn",       "medianOps": 8270 },
+        { "name": "B2-vec RigidJS 10k churn",  "medianOps": 13485 },
+        { "name": "B3-vec-handle JS 100k",     "medianOps": 3096 },
+        { "name": "B3-vec-handle RigidJS 100k","medianOps": 1466 },
+        { "name": "B3-vec-column JS 100k",     "medianOps": 3847 },
+        { "name": "B3-vec-column RigidJS 100k","medianOps": 11507 },
+        { "name": "B3-vec-get JS 100k",        "medianOps": 3470 },
+        { "name": "B3-vec-get RigidJS 100k",   "medianOps": 5798 },
+        { "name": "B3-vec-forEach JS 100k",    "medianOps": 4161 },
+        { "name": "B3-vec-forEach RigidJS 100k","medianOps": 3632 },
+        { "name": "B3-slab-forEach JS 100k",   "medianOps": 4282 },
+        { "name": "B3-slab-forEach RigidJS 100k","medianOps": 3138 }
+      ]
+    }
+  },
+  "sustained": {
+    "n": 3,
+    "B8-sustained": {
+      "js":    { "medianTicks": 18240, "medP99Ms": 0.252 },
+      "rigid": { "medianTicks": 61296, "medP99Ms": 0.191 },
+      "ratio": 3.36
+    },
+    "B8-vec": {
+      "js":    { "medianTicks": 17742, "medP99Ms": 0.298 },
+      "rigid": { "medianTicks": 9531,  "medP99Ms": 1.211 },
+      "ratio": 0.54
+    },
+    "B9-scaling": {
+      "10k":  { "jsTicks": 114848, "rigidTicks": 115751, "ratio": 1.01 },
+      "100k": { "jsTicks": 9869,   "rigidTicks": 1764,   "ratio": 0.18 },
+      "1M":   { "jsTicks": 789,    "rigidTicks": 178,    "ratio": 0.23 }
+    },
+    "B9-vec": {
+      "10k":  { "jsTicks": 115443, "rigidTicks": 20868,  "ratio": 0.18 },
+      "100k": { "jsTicks": 9890,   "rigidTicks": 2102,   "ratio": 0.21 },
+      "1M":   { "jsTicks": 785,    "rigidTicks": 213,    "ratio": 0.27 }
+    }
+  }
+}
